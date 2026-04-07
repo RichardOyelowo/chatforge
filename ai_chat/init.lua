@@ -1,4 +1,3 @@
--- chatforge/init.lua
 -- Entry point. Call require("chatforge").setup({ ... }) once in your config.
 -- Commands:
 --   :Chat                   open / focus the chat window
