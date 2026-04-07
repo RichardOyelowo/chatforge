@@ -34,8 +34,7 @@ end
 
 -- ── action button activation ───────────────────────────────────────────────
 -- Reads the line under the cursor, figures out which button and block index,
--- then dispatches to the right action. Call this from whatever keymap the
--- user sets (e.g. <CR>).
+-- then dispatches to the right action. Call this from whatever keymap sets (e.g. <CR>).
 
 function M.activate_cursor_button()
   local line = vim.api.nvim_get_current_line()
