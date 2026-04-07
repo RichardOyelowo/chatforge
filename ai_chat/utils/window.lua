@@ -1,6 +1,3 @@
--- ai_chat/utils/window.lua
--- Helpers for creating floating windows.
-
 local M = {}
 
 --- Create a centred floating window.
