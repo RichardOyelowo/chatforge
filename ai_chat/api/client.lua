@@ -1,8 +1,8 @@
 local M        = {}
-local config   = require("ai_chat.config")
-local state    = require("ai_chat.core.state")
-local backends = require("ai_chat.api.backends")
-local log      = require("ai_chat.utils.logger")
+local config   = require("chatforge.config")
+local state    = require("chatforge.core.state")
+local backends = require("chatforge.api.backends")
+local log      = require("chatforge.utils.logger")
 
 --- Send messages to whatever backend the buffer has selected.
 ---@param src_bufnr number          source (non-chat) buffer

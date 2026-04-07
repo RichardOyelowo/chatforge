@@ -1,12 +1,12 @@
 local M          = {}
-local state      = require("ai_chat.core.state")
-local render     = require("ai_chat.ui.render")
-local client     = require("ai_chat.api.client")
-local dispatcher = require("ai_chat.core.dispatcher")
-local parser     = require("ai_chat.core.parser")
-local actions    = require("ai_chat.core.actions")
-local floating   = require("ai_chat.ui.floating")
-local log        = require("ai_chat.utils.logger")
+local state      = require("chatforge.core.state")
+local render     = require("chatforge.ui.render")
+local client     = require("chatforge.api.client")
+local dispatcher = require("chatforge.core.dispatcher")
+local parser     = require("chatforge.core.parser")
+local actions    = require("chatforge.core.actions")
+local floating   = require("chatforge.ui.floating")
+local log        = require("chatforge.utils.logger")
 
 -- ── buffer / window ────────────────────────────────────────────────────────
 
@@ -39,7 +39,7 @@ end
 function M.activate_cursor_button()
   local line = vim.api.nvim_get_current_line()
   if not line:match("%[ %a+ #%d+ %]") then
-    vim.notify("[ai_chat] No action button on this line.", vim.log.levels.INFO)
+    vim.notify("[chatforge] No action button on this line.", vim.log.levels.INFO)
     return
   end
 
@@ -61,7 +61,7 @@ function M.activate_cursor_button()
   end
 
   if not btn or not idx then
-    vim.notify("[ai_chat] Could not detect button under cursor.", vim.log.levels.WARN)
+    vim.notify("[chatforge] Could not detect button under cursor.", vim.log.levels.WARN)
     return
   end
 
@@ -85,7 +85,7 @@ end
 
 function M.send_message(src_bufnr, prefilled_input)
   if state.loading then
-    vim.notify("[ai_chat] Request in progress…", vim.log.levels.WARN)
+    vim.notify("[chatforge] Request in progress…", vim.log.levels.WARN)
     return
   end
 
@@ -145,7 +145,7 @@ function M.reset(src_bufnr)
     vim.api.nvim_buf_set_option(b, "modifiable", false)
     render.write_header()
   end
-  vim.notify("[ai_chat] Conversation reset.", vim.log.levels.INFO)
+  vim.notify("[chatforge] Conversation reset.", vim.log.levels.INFO)
 end
 
 -- ── public open ────────────────────────────────────────────────────────────

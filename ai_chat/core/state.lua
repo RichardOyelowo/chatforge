@@ -10,7 +10,7 @@ M.pending_blocks = {}  ---@type {lang:string,content:string,applied:boolean}[]
 
 local config
 local function default_model()
-  config = config or require("ai_chat.config")
+  config = config or require("chatforge.config")
   return config.values.default_model
 end
 

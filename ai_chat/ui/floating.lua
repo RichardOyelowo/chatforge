@@ -3,9 +3,9 @@
 --   M.close()                     close the current float if open
 
 local M      = {}
-local state  = require("ai_chat.core.state")
-local actions = require("ai_chat.core.actions")
-local log    = require("ai_chat.utils.logger")
+local state  = require("chatforge.core.state")
+local actions = require("chatforge.core.actions")
+local log    = require("chatforge.utils.logger")
 
 local _float_winnr = nil  ---@type number|nil
 local _float_bufnr = nil  ---@type number|nil
@@ -110,7 +110,7 @@ function M.preview(block_idx)
   local block = state.pending_blocks[block_idx]
   if not block then
     vim.notify(
-      string.format("[ai_chat] No code block #%d pending.", block_idx),
+      string.format("[chatforge] No code block #%d pending.", block_idx),
       vim.log.levels.WARN
     )
     return
@@ -170,7 +170,7 @@ function M.preview(block_idx)
 
   vim.keymap.set("n", "y", function()
     actions.yank(block_idx)
-    vim.notify("[ai_chat] Yanked. Float stays open.", vim.log.levels.INFO)
+    vim.notify("[chatforge] Yanked. Float stays open.", vim.log.levels.INFO)
   end, o)
 
   -- Close when focus leaves

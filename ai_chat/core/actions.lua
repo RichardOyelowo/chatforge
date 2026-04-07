@@ -1,6 +1,6 @@
 local M     = {}
-local state = require("ai_chat.core.state")
-local log   = require("ai_chat.utils.logger")
+local state = require("chatforge.core.state")
+local log   = require("chatforge.utils.logger")
 
 -- ── helpers ────────────────────────────────────────────────────────────────
 
@@ -22,20 +22,20 @@ end
 function M.apply_to_current(idx)
   local lines, err = get_block_lines(idx)
   if err then
-    vim.notify("[ai_chat] " .. err, vim.log.levels.WARN)
+    vim.notify("[chatforge] " .. err, vim.log.levels.WARN)
     return
   end
 
   local bufnr = vim.api.nvim_get_current_buf()
   -- Don't accidentally clobber the chat buffer itself
   if bufnr == state.chat_bufnr then
-    vim.notify("[ai_chat] Switch to your source buffer first.", vim.log.levels.WARN)
+    vim.notify("[chatforge] Switch to your source buffer first.", vim.log.levels.WARN)
     return
   end
 
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   state.pending_blocks[idx].applied = true
-  vim.notify(string.format("[ai_chat] Applied block #%d to %s",
+  vim.notify(string.format("[chatforge] Applied block #%d to %s",
     idx, vim.api.nvim_buf_get_name(bufnr)), vim.log.levels.INFO)
   log.log("apply_to_current: block=%d bufnr=%d", idx, bufnr)
 end
@@ -46,7 +46,7 @@ end
 function M.apply_to_file(idx, fpath)
   local lines, err = get_block_lines(idx)
   if err then
-    vim.notify("[ai_chat] " .. err, vim.log.levels.WARN)
+    vim.notify("[chatforge] " .. err, vim.log.levels.WARN)
     return
   end
 
@@ -56,7 +56,7 @@ function M.apply_to_file(idx, fpath)
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.cmd("write")
   state.pending_blocks[idx].applied = true
-  vim.notify("[ai_chat] Written block #" .. idx .. " → " .. fpath, vim.log.levels.INFO)
+  vim.notify("[chatforge] Written block #" .. idx .. " → " .. fpath, vim.log.levels.INFO)
 end
 
 --- Open a diff between block N and the current buffer in a new tab.
@@ -64,13 +64,13 @@ end
 function M.diff_with_current(idx)
   local lines, err = get_block_lines(idx)
   if err then
-    vim.notify("[ai_chat] " .. err, vim.log.levels.WARN)
+    vim.notify("[chatforge] " .. err, vim.log.levels.WARN)
     return
   end
 
   local orig_bufnr = vim.api.nvim_get_current_buf()
   if orig_bufnr == state.chat_bufnr then
-    vim.notify("[ai_chat] Switch to your source buffer first.", vim.log.levels.WARN)
+    vim.notify("[chatforge] Switch to your source buffer first.", vim.log.levels.WARN)
     return
   end
 
@@ -88,7 +88,7 @@ function M.diff_with_current(idx)
   vim.cmd("diffthis")
   vim.bo[scratch].buftype = "nofile"
 
-  vim.notify("[ai_chat] Diff opened in new tab. :tabclose when done.", vim.log.levels.INFO)
+  vim.notify("[chatforge] Diff opened in new tab. :tabclose when done.", vim.log.levels.INFO)
 end
 
 --- Yank block N to the unnamed register.
@@ -96,17 +96,17 @@ end
 function M.yank(idx)
   local lines, err = get_block_lines(idx)
   if err then
-    vim.notify("[ai_chat] " .. err, vim.log.levels.WARN)
+    vim.notify("[chatforge] " .. err, vim.log.levels.WARN)
     return
   end
   vim.fn.setreg('"', table.concat(lines, "\n"))
-  vim.notify(string.format("[ai_chat] Block #%d yanked to register.", idx), vim.log.levels.INFO)
+  vim.notify(string.format("[chatforge] Block #%d yanked to register.", idx), vim.log.levels.INFO)
 end
 
 --- Discard all pending blocks (Reject all).
 function M.reject_all()
   state.pending_blocks = {}
-  vim.notify("[ai_chat] All pending changes rejected.", vim.log.levels.INFO)
+  vim.notify("[chatforge] All pending changes rejected.", vim.log.levels.INFO)
 end
 
 return M

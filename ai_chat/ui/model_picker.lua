@@ -1,7 +1,7 @@
 local M      = {}
-local state  = require("ai_chat.core.state")
-local config = require("ai_chat.config")
-local log    = require("ai_chat.utils.logger")
+local state  = require("chatforge.core.state")
+local config = require("chatforge.config")
+local log    = require("chatforge.utils.logger")
 
 --- Fetch the list of models Ollama knows about.
 ---@param  on_done fun(models:string[]|nil, err:string|nil)
@@ -43,7 +43,7 @@ end
 function M.pick(src_bufnr)
   fetch_models(function(models, err)
     if err then
-      vim.notify("[ai_chat] Could not fetch models: " .. err, vim.log.levels.WARN)
+      vim.notify("[chatforge] Could not fetch models: " .. err, vim.log.levels.WARN)
       models = { config.values.default_model }
     end
 
@@ -57,7 +57,7 @@ function M.pick(src_bufnr)
     }, function(choice)
       if not choice then return end
       state.set_model(src_bufnr, choice)
-      vim.notify("[ai_chat] Model set to: " .. choice, vim.log.levels.INFO)
+      vim.notify("[chatforge] Model set to: " .. choice, vim.log.levels.INFO)
       log.log("model_picker: bufnr=%d model=%s", src_bufnr, choice)
     end)
   end)

@@ -1,5 +1,5 @@
 local M   = {}
-local log = require("ai_chat.utils.logger")
+local log = require("chatforge.utils.logger")
 
 -- ── Ollama ─────────────────────────────────────────────────────────────────
 

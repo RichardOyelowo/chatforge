@@ -1,5 +1,5 @@
 local M     = {}
-local state = require("ai_chat.core.state")
+local state = require("chatforge.core.state")
 
 -- ── internal ───────────────────────────────────────────────────────────────
 

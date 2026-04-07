@@ -1,6 +1,6 @@
 local M      = {}
-local buf_u  = require("ai_chat.utils.buffer")
-local log    = require("ai_chat.utils.logger")
+local buf_u  = require("chatforge.utils.buffer")
+local log    = require("chatforge.utils.logger")
 
 ---@alias DispatchAction "chat"|"edit_file"|"create_file"|"delete_file"|"explain"
 
