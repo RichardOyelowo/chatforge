@@ -76,8 +76,7 @@ function M.append_segments(segments)
  
   for _, seg in ipairs(segments) do
     if seg.type == "text" then
-      for _, l in ipairs(vim.split(seg.content, "
-")) do
+      for _, l in ipairs(vim.split(seg.content, "")) do
         table.insert(lines, l)
       end
  
