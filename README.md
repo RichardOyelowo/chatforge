@@ -406,4 +406,4 @@ Path doesn't exist or can't be opened. Paths are relative to Neovim's cwd — `:
 
 ---
 
-**Built by Richard.**
+**Built by Richard for the love of development.**
