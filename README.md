@@ -40,6 +40,9 @@ Optional but worth having:
 ---
 
 ## Installation
+**If you want no automatic context at all** — just ask a plain question that doesn't start with `fix`, `explain`, or `refactor`. chatforge only injects context when the phrasing suggests you're working on the current file.
+
+---
 
 ### lazy.nvim
 
