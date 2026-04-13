@@ -184,12 +184,17 @@ If you're in a file and you say `fix`, `explain`, or `refactor`, chatforge injec
 If you're currently editing `lua/chatforge/core/parser.lua`, that message becomes:
 
 ```
+:ChatSend fix the edge case in the pattern match
+```
+
+If you're currently editing `lua/chatforge/core/parser.lua`, that message becomes:
+
 fix the edge case in the pattern match
 
 File: lua/chatforge/core/parser.lua
+
 ```lua
 -- entire file contents here
-```
 ```
 
 You didn't have to paste the code. You didn't have to say which file. The model gets exactly what it needs to give you a useful answer.
@@ -206,16 +211,17 @@ This automatic injection happens for:
 | `delete file <path>` | Nothing extra |
 | Anything else | Sent as-is |
 
-**If you want to ask about a different file** — not the one you currently have open — use `@file` explicitly. That overrides the auto-injection and lets you point at anything:
+**If you want to ask about a different file** not the one you currently have open use `@file` explicitly. That overrides the auto-injection and lets you point at anything:
 
 ```
 -- you're in init.lua but want to ask about parser.lua
 :ChatSend fix the edge case in @file lua/chatforge/core/parser.lua
 ```
 
-**If you want no automatic context at all** — just ask a plain question that doesn't start with `fix`, `explain`, or `refactor`. chatforge only injects context when the phrasing suggests you're working on the current file.
+**If you want no automatic context at all** just ask a plain question that doesn't start with `fix`, `explain`, or `refactor`. chatforge only injects context when the phrasing suggests you're working on the current file.
 
 ---
+
 
 ## Code Blocks and Actions
 
