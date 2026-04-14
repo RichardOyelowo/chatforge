@@ -29,23 +29,19 @@ local function classify(input)
 end
 
 -- Read a file from disk and return its contents, or an error string.
--- Paths are resolved relative to cwd. A leading "/" is treated as cwd-relative
--- so @file /lua/init.lua means cwd/lua/init.lua, not filesystem /lua/init.lua.
--- Absolute paths with ~ expansion still work (vim.fn.expand handles those).
+-- Uses vim.fn.expand so ~, $VAR, relative, and absolute paths all work as-is.
 local function read_file(path)
   local expanded = vim.fn.expand(path)
-  -- Only reanchor to cwd if the path started with a bare slash
-  -- (not ~/ which expand already resolved to an absolute home path)
-  if path:sub(1, 1) == "/" and path:sub(1, 2) ~= "//" then
-    local cwd = vim.fn.getcwd()
-    -- strip the leading slash and join with cwd
-    expanded = cwd .. "/" .. path:match("^/(.*)$")
-  end
   local f, err = io.open(expanded, "r")
   if not f then return nil, "cannot open " .. expanded .. ": " .. (err or "unknown") end
   local contents = f:read("*a")
   f:close()
   return contents, nil
+end
+
+-- True when the path means "inject the currently open buffer" rather than read a real path.
+local function is_current_file_ref(path)
+  return path == "/" or path == "." or path == ""
 end
 
 -- Resolve a dir path relative to cwd.
@@ -82,25 +78,54 @@ local function read_dir(path)
 end
 
 -- Resolve all @file and @dir mentions in the input.
--- Returns the expanded prompt and a list of { tag, path, ok } for logging.
-local function resolve_at_mentions(input)
+-- @file behaviours:
+--   @file          (bare)   → inject current open buffer (in-memory content)
+--   @file /        or .     → inject current open buffer
+--   @file some/path         → read from disk via vim.fn.expand (relative or absolute)
+-- @dir always resolves relative to cwd (/ and . mean cwd).
+local function resolve_at_mentions(input, src_bufnr)
   local injections = {}
   local resolved   = input
 
-  -- Match @file <path> or @dir <path>  (path ends at whitespace or end of string)
+  -- 1. Bare @file with no path — replace before the path-based loop
+  --    Pattern: @file not followed by non-whitespace (end of string or space/newline next)
+  resolved = resolved:gsub("(@[fF][iI][lL][eE])(%s+[%./]?%s*$)", function(tag, _)
+    return tag .. " /"  -- normalise to @file / so the path loop handles it
+  end)
+  resolved = resolved:gsub("(@[fF][iI][lL][eE])%s*$", function(_)
+    -- bare @file at very end of string
+    local name    = buf_u.get_name(src_bufnr)
+    local ft      = buf_u.get_filetype(src_bufnr)
+    local content = buf_u.get_content(src_bufnr)
+    table.insert(injections, { tag = "@file", path = "(current buffer)", ok = true })
+    return string.format("\n\nFile: %s\n```%s\n%s\n```", name ~= "" and name or "(unnamed)", ft, content)
+  end)
+
+  -- 2. @file <path> — path ends at whitespace or end of string
   for tag, path in input:gmatch("(@[fF][iI][lL][eE]%s+(%S+))") do
-    local contents, err = read_file(path)
-    if err then
-      local msg = "\n<!-- @file " .. path .. " could not be read: " .. err .. " -->"
-      resolved = resolved:gsub(vim.pesc(tag), msg, 1)
+    local block
+    if is_current_file_ref(path) then
+      -- / or . → inject current buffer content (in-memory, not read from disk)
+      local name    = buf_u.get_name(src_bufnr)
+      local ft      = buf_u.get_filetype(src_bufnr)
+      local content = buf_u.get_content(src_bufnr)
+      block = string.format("\n\nFile: %s\n```%s\n%s\n```", name ~= "" and name or "(unnamed)", ft, content)
+      table.insert(injections, { tag = "@file", path = path .. " (current buffer)", ok = true })
     else
-      local ft   = vim.filetype.match({ filename = path }) or ""
-      local block = string.format("\n\nFile: %s\n```%s\n%s\n```", path, ft, contents)
-      resolved = resolved:gsub(vim.pesc(tag), block, 1)
-      table.insert(injections, { tag = "@file", path = path, ok = true })
+      -- explicit path — read from disk exactly as written
+      local contents, err = read_file(path)
+      if err then
+        block = "\n<!-- @file " .. path .. " could not be read: " .. err .. " -->"
+      else
+        local ft = vim.filetype.match({ filename = path }) or ""
+        block = string.format("\n\nFile: %s\n```%s\n%s\n```", path, ft, contents)
+        table.insert(injections, { tag = "@file", path = path, ok = true })
+      end
     end
+    resolved = resolved:gsub(vim.pesc(tag), block, 1)
   end
 
+  -- 3. @dir <path> — always cwd-anchored
   for tag, path in input:gmatch("(@[dD][iI][rR]%s+(%S+))") do
     local listing, err = read_dir(path)
     if err then
@@ -133,7 +158,7 @@ end
 
 function M.dispatch(input, src_bufnr)
   -- 1. Resolve @file / @dir mentions first
-  local resolved, injections = resolve_at_mentions(input)
+  local resolved, injections = resolve_at_mentions(input, src_bufnr)
   for _, inj in ipairs(injections) do
     log.log("dispatch: injected %s %s", inj.tag, inj.path)
   end
