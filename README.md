@@ -1,4 +1,4 @@
-# chatforge.nvim
+# <img src="images/chatforge_logo.svg">
 
 An AI dev assistant that lives inside Neovim. Persistent chat per buffer, Ollama backend, code actions, file and directory injection, per-buffer model switching. No keymaps forced on you.
 
