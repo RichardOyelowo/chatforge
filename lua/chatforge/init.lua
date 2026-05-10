@@ -1,6 +1,6 @@
 -- Commands:
 --   :Chat                   open / focus the chat window
---   :ChatSend [message]     no args = prompt, args = send, visual = send selection
+--   :ChatSend [message]     no args = focus input pane, args = send, visual = send selection
 --   :ChatSetModel [model]   set model for current buffer, or open picker
 --   :ChatReset              clear history and reopen
 --   :ChatActivate           activate the action button under the cursor
@@ -31,14 +31,18 @@ function M.setup(opts)
   end, { desc = "Open chatforge window" })
  
   -- ── :ChatSend [message] ───────────────────────────────────────────────
-  -- No args      → opens vim.ui.input prompt
+  -- No args      → focuses the right-side input pane
   -- With args    → sends the text directly
   -- Visual range → wraps selected lines in a code block and sends
   vim.api.nvim_create_user_command("ChatSend", function(cmd)
     local src = vim.api.nvim_get_current_buf()
  
-    -- Don't let src be the chat buffer itself
-    if src == state.chat_bufnr then
+    -- Don't let src be the chat UI itself
+    if state.is_plugin_buf(src) then
+      src = state.source_bufnr
+    end
+
+    if not src or not vim.api.nvim_buf_is_valid(src) then
       vim.notify(
         "[chatforge] Switch to your source buffer first, then run :ChatSend.",
         vim.log.levels.WARN
@@ -56,7 +60,7 @@ function M.setup(opts)
     elseif cmd.args ~= "" then
       input = cmd.args
     end
-    -- input == nil  →  send_message opens vim.ui.input
+    -- input == nil  →  send_message focuses the right-side input pane
  
     chat.open(src)
     vim.defer_fn(function()
@@ -67,6 +71,9 @@ function M.setup(opts)
   -- ── :ChatSetModel [model] ─────────────────────────────────────────────
   vim.api.nvim_create_user_command("ChatSetModel", function(cmd)
     local src = vim.api.nvim_get_current_buf()
+    if state.is_plugin_buf(src) then
+      src = state.source_bufnr or src
+    end
     if cmd.args ~= "" then
       state.set_model(src, cmd.args)
       vim.notify("[chatforge] Model → " .. cmd.args, vim.log.levels.INFO)
@@ -78,6 +85,9 @@ function M.setup(opts)
   -- ── :ChatReset ────────────────────────────────────────────────────────
   vim.api.nvim_create_user_command("ChatReset", function()
     local src = vim.api.nvim_get_current_buf()
+    if state.is_plugin_buf(src) then
+      src = state.source_bufnr or src
+    end
     chat.open(src)
     vim.defer_fn(function() chat.reset(src) end, 80)
   end, { desc = "Reset chatforge history" })
