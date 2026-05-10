@@ -80,13 +80,19 @@ function M.append_segments(segments)
  
     elseif seg.type == "code" then
       local block_start = #lines
+      local block_index = seg.index or (#code_ranges + 1)
       table.insert(lines, "```" .. (seg.lang or ""))
       for _, l in ipairs(vim.split(seg.content, NL, { plain = true })) do
         table.insert(lines, l)
       end
       table.insert(lines, "```")
+      local block_end = #lines
+      table.insert(lines, string.format(
+        "  [ Preview #%d ]  [ Apply #%d ]  [ Diff #%d ]  [ Yank #%d ]",
+        block_index, block_index, block_index, block_index
+      ))
       table.insert(lines, "")
-      table.insert(code_ranges, { block_start, #lines - 1 })
+      table.insert(code_ranges, { block_start, block_end })
     end
   end
  
@@ -95,7 +101,7 @@ function M.append_segments(segments)
   if n_blocks > 0 then
     table.insert(lines, "")
     if n_blocks == 1 then
-      table.insert(lines, "  :ChatPreview   :ChatApply   :ChatDiff   :ChatReject")
+      table.insert(lines, "  Put the cursor on an action above and run :ChatActivate, or use :ChatApply / :ChatDiff / :ChatReject")
     else
       local previews = {}
       for i = 1, n_blocks do
