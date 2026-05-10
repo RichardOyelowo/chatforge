@@ -5,6 +5,10 @@ M.buffers = {}
 
 M.chat_bufnr    = nil  ---@type number|nil
 M.chat_winnr    = nil  ---@type number|nil
+M.input_bufnr   = nil  ---@type number|nil
+M.input_winnr   = nil  ---@type number|nil
+M.source_bufnr  = nil  ---@type number|nil
+M.source_winnr  = nil  ---@type number|nil
 M.loading       = false
 M.pending_blocks = {}  ---@type {lang:string,content:string,applied:boolean}[]
 
@@ -38,6 +42,17 @@ function M.chat_is_open()
     and vim.api.nvim_buf_is_valid(M.chat_bufnr)
     and M.chat_winnr ~= nil
     and vim.api.nvim_win_is_valid(M.chat_winnr)
+end
+
+function M.input_is_open()
+  return M.input_bufnr ~= nil
+    and vim.api.nvim_buf_is_valid(M.input_bufnr)
+    and M.input_winnr ~= nil
+    and vim.api.nvim_win_is_valid(M.input_winnr)
+end
+
+function M.is_plugin_buf(bufnr)
+  return bufnr == M.chat_bufnr or bufnr == M.input_bufnr
 end
 
 return M
