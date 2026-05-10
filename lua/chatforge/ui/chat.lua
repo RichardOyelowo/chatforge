@@ -19,8 +19,19 @@ local function create_chat_buf()
   vim.bo[b].modifiable = false
   return b
 end
+
+local function create_input_buf()
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_name(b, "AI Chat Input")
+  vim.bo[b].filetype   = "markdown"
+  vim.bo[b].buftype    = "nofile"
+  vim.bo[b].bufhidden  = "hide"
+  vim.bo[b].swapfile   = false
+  vim.bo[b].modifiable = true
+  return b
+end
  
-local function open_chat_win(bufnr)
+local function open_chat_win(bufnr, input_bufnr)
   vim.cmd("botright vsplit")
   local w = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(w, bufnr)
@@ -29,49 +40,46 @@ local function open_chat_win(bufnr)
   vim.wo[w].number     = false
   vim.wo[w].signcolumn = "no"
   vim.cmd("vertical resize 65")
-  return w
+
+  vim.cmd("botright 6split")
+  local input_w = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(input_w, input_bufnr)
+  vim.wo[input_w].wrap       = true
+  vim.wo[input_w].linebreak  = true
+  vim.wo[input_w].number     = false
+  vim.wo[input_w].relativenumber = false
+  vim.wo[input_w].signcolumn = "no"
+  vim.wo[input_w].winfixheight = true
+  vim.wo[input_w].winbar = " chatforge input  |  Enter sends  |  Esc returns to normal mode "
+  vim.cmd("resize 6")
+
+  return w, input_w
 end
- 
--- ── floating input ─────────────────────────────────────────────────────────
--- Used by ChatSend when called with no args.
- 
-local function open_float_input(on_submit)
-  local width  = 60
-  local row    = math.floor(vim.o.lines * 0.4)
-  local col    = math.floor((vim.o.columns - width) / 2)
- 
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].bufhidden  = "wipe"
-  vim.bo[buf].buftype    = "prompt"
-  vim.bo[buf].filetype   = "text"
- 
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative  = "editor",
-    width     = width,
-    height    = 1,
-    row       = row,
-    col       = col,
-    style     = "minimal",
-    border    = "rounded",
-    title     = " chatforge · send message ",
-    title_pos = "center",
-  })
- 
-  vim.fn.prompt_setprompt(buf, "> ")
-  vim.fn.prompt_setcallback(buf, function(text)
-    vim.api.nvim_win_close(win, true)
-    if text and text ~= "" then on_submit(text) end
-  end)
-  vim.fn.prompt_setinterrupt(buf, function()
-    vim.api.nvim_win_close(win, true)
-  end)
- 
-  vim.cmd("startinsert")
- 
-  local o = { noremap = true, silent = true, buffer = buf }
-  vim.keymap.set("i", "<Esc>", function()
-    vim.api.nvim_win_close(win, true)
-  end, o)
+
+-- ── right-side input pane ─────────────────────────────────────────────────
+
+local function trim_lines(lines)
+  local first, last = 1, #lines
+  while first <= last and lines[first]:match("^%s*$") do first = first + 1 end
+  while last >= first and lines[last]:match("^%s*$") do last = last - 1 end
+  if first > last then return "" end
+  local out = {}
+  for i = first, last do table.insert(out, lines[i]) end
+  return table.concat(out, "\n")
+end
+
+local function clear_input()
+  local b = state.input_bufnr
+  if not b or not vim.api.nvim_buf_is_valid(b) then return end
+  vim.bo[b].modifiable = true
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, {})
+end
+
+local function focus_input()
+  if state.input_is_open() then
+    vim.api.nvim_set_current_win(state.input_winnr)
+    vim.cmd("startinsert")
+  end
 end
  
 -- ── action button activation ───────────────────────────────────────────────
@@ -87,7 +95,7 @@ function M.activate_cursor_button()
   local btn, idx
  
   for b, n in line:gmatch("%[ (%a+) #(%d+) %]") do
-    local start = line:find("%[ " .. b .. " #" .. n .. " %]", 1, true)
+    local start = line:find("[ " .. b .. " #" .. n .. " ]", 1, true)
     if start and start <= col then
       btn = b:lower(); idx = tonumber(n)
     end
@@ -122,6 +130,12 @@ end
 -- ── send flow ──────────────────────────────────────────────────────────────
  
 local function do_send(src_bufnr, input)
+  if not input or input:match("^%s*$") then
+    focus_input()
+    return
+  end
+
+  state.source_bufnr = src_bufnr
   local model      = state.get_model(src_bufnr)
   local dispatched = dispatcher.dispatch(input, src_bufnr)
  
@@ -146,10 +160,45 @@ local function do_send(src_bufnr, input)
     end
     log.log("pending_blocks=%d", #state.pending_blocks)
     render.append_segments(segments)
+    focus_input()
   end)
 end
+
+local function send_from_input()
+  if state.loading then
+    vim.notify("[chatforge] Request in progress...", vim.log.levels.WARN)
+    return
+  end
+
+  local b = state.input_bufnr
+  if not b or not vim.api.nvim_buf_is_valid(b) then return end
+
+  local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  local input = trim_lines(lines)
+  if input == "" then
+    focus_input()
+    return
+  end
+
+  clear_input()
+  do_send(state.source_bufnr or vim.api.nvim_get_current_buf(), input)
+end
+
+local function setup_input_keymaps(bufnr)
+  local opts = { noremap = true, silent = true, buffer = bufnr }
+  vim.keymap.set("n", "<CR>", send_from_input, opts)
+  vim.keymap.set("i", "<CR>", function()
+    vim.cmd("stopinsert")
+    send_from_input()
+  end, opts)
+  vim.keymap.set("n", "<C-s>", send_from_input, opts)
+  vim.keymap.set("i", "<C-s>", function()
+    vim.cmd("stopinsert")
+    send_from_input()
+  end, opts)
+end
  
--- input == nil → open floating prompt
+-- input == nil → focus the right-side input pane
 -- input == string → send directly
 function M.send_message(src_bufnr, input)
   if state.loading then
@@ -160,9 +209,8 @@ function M.send_message(src_bufnr, input)
   if input then
     do_send(src_bufnr, input)
   else
-    open_float_input(function(text)
-      do_send(src_bufnr, text)
-    end)
+    state.source_bufnr = src_bufnr
+    focus_input()
   end
 end
  
@@ -178,6 +226,7 @@ function M.reset(src_bufnr)
     vim.api.nvim_buf_set_option(b, "modifiable", false)
     render.write_header()
   end
+  clear_input()
   vim.notify("[chatforge] Conversation reset.", vim.log.levels.INFO)
 end
  
@@ -185,15 +234,23 @@ end
  
 function M.open(src_bufnr)
   src_bufnr = src_bufnr or vim.api.nvim_get_current_buf()
+  if not state.is_plugin_buf(src_bufnr) then
+    state.source_bufnr = src_bufnr
+    state.source_winnr = vim.api.nvim_get_current_win()
+  end
   if state.chat_is_open() then
-    vim.api.nvim_set_current_win(state.chat_winnr)
+    focus_input()
     return
   end
   local origin_win = vim.api.nvim_get_current_win()
   local bufnr      = create_chat_buf()
-  local winnr      = open_chat_win(bufnr)
+  local input_buf  = create_input_buf()
+  local winnr, input_win = open_chat_win(bufnr, input_buf)
   state.chat_bufnr = bufnr
   state.chat_winnr = winnr
+  state.input_bufnr = input_buf
+  state.input_winnr = input_win
+  setup_input_keymaps(input_buf)
   render.write_header()
   log.log("chat open buf=%d win=%d src=%d", bufnr, winnr, src_bufnr)
   vim.api.nvim_create_autocmd("WinClosed", {
@@ -201,11 +258,20 @@ function M.open(src_bufnr)
     once     = true,
     callback = function()
       state.chat_winnr = nil
+      state.input_winnr = nil
       if vim.api.nvim_win_is_valid(origin_win) then
         vim.api.nvim_set_current_win(origin_win)
       end
     end,
   })
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern  = tostring(input_win),
+    once     = true,
+    callback = function()
+      state.input_winnr = nil
+    end,
+  })
+  focus_input()
 end
  
 return M
