@@ -89,7 +89,10 @@ local function clear_input()
   local b = state.input_bufnr
   if not b or not vim.api.nvim_buf_is_valid(b) then return end
   vim.bo[b].modifiable = true
-  vim.api.nvim_buf_set_lines(b, 0, -1, false, {})
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, { "" })
+  if state.input_is_open() then
+    vim.api.nvim_win_set_cursor(state.input_winnr, { 1, 0 })
+  end
 end
 
 local function completion_items()
@@ -130,12 +133,19 @@ local function completion_items()
   return items
 end
 
+local function completion_prefix(line, col)
+  local before = line:sub(1, col)
+  return before:match("(@[fF][iI][lL][eE]%s+%S*)$")
+    or before:match("(@[dD][iI][rR]%s+%S*)$")
+    or before:match("(@%S*)$")
+end
+
 local function trigger_at_completion()
   vim.schedule(function()
     if not state.input_is_open() then return end
     local line = vim.api.nvim_get_current_line()
     local col = vim.fn.col(".") - 1
-    local prefix = line:sub(1, col):match("(@%S*)$")
+    local prefix = completion_prefix(line, col)
     if not prefix then return end
     local start_col = col - #prefix + 1
     local filtered = {}
@@ -156,7 +166,7 @@ local function setup_input_autocmds(bufnr)
     callback = function()
       local line = vim.api.nvim_get_current_line()
       local col = vim.fn.col(".") - 1
-      if line:sub(1, col):match("@%S*$") then
+      if completion_prefix(line, col) then
         trigger_at_completion()
       end
     end,
@@ -180,6 +190,15 @@ local function has_staged_changes()
   end
   return false
 end
+
+local function request_history(src_bufnr, current_prompt)
+  local history = {}
+  for _, msg in ipairs(state.get_buf(src_bufnr).history) do
+    table.insert(history, { role = msg.role, content = msg.content })
+  end
+  table.insert(history, { role = "user", content = current_prompt })
+  return history
+end
  
 -- ── send flow ──────────────────────────────────────────────────────────────
  
@@ -202,6 +221,8 @@ local function do_send(src_bufnr, input)
   end
 
   state.source_bufnr = src_bufnr
+  state.request_id = state.request_id + 1
+  local request_id = state.request_id
   local model      = state.get_model(src_bufnr)
   local dispatched = dispatcher.dispatch(input, src_bufnr)
   local edit_target = state.edit_target
@@ -211,16 +232,19 @@ local function do_send(src_bufnr, input)
     or dispatched.action == "create_file"
  
   render.append_user(input, model)
-  state.append_message(src_bufnr, "user", dispatched.prompt)
   render.append_status("Thinking…")
  
-  client.complete(src_bufnr, state.get_buf(src_bufnr).history, function(text, err)
+  client.complete(src_bufnr, request_history(src_bufnr, dispatched.prompt), function(text, err)
+    if request_id ~= state.request_id then
+      return
+    end
     render.remove_last_status()
     if err then
       render.append_status("Error: " .. err, "error")
       log.err(err)
       return
     end
+    state.append_message(src_bufnr, "user", input)
     state.append_message(src_bufnr, "assistant", text)
     local segments = parser.parse(text)
     state.pending_blocks = {}
@@ -287,8 +311,20 @@ local function send_from_input()
   end
 end
 
--- input == nil → focus the right-side input pane
--- input == string → send directly
+local function setup_input_keymaps(bufnr)
+  local opts = { noremap = true, silent = true, buffer = bufnr }
+  vim.keymap.set("n", "<CR>", send_from_input, opts)
+  vim.keymap.set("i", "<CR>", function()
+    vim.cmd("stopinsert")
+    send_from_input()
+  end, opts)
+  vim.keymap.set("i", "<C-j>", function()
+    vim.api.nvim_put({ "" }, "l", true, true)
+  end, opts)
+end
+
+-- input == nil: focus the right-side input pane
+-- input == string: send directly
 function M.send_message(src_bufnr, input)
   if state.loading then
     vim.notify("[chatforge] Request in progress…", vim.log.levels.WARN)
@@ -314,6 +350,8 @@ function M.reset(src_bufnr)
     vim.notify("[chatforge] Wait for the staged implementation to finish writing before reset.", vim.log.levels.WARN)
     return
   end
+  state.request_id = state.request_id + 1
+  state.loading = false
   if has_staged_changes() then
     actions.reject_all()
   end
@@ -351,6 +389,7 @@ function M.open(src_bufnr)
   state.input_bufnr = input_buf
   state.input_winnr = open_input_win(input_buf)
   setup_input_autocmds(input_buf)
+  setup_input_keymaps(input_buf)
   render.write_header()
   log.log("chat open buf=%d win=%d src=%d", bufnr, winnr, src_bufnr)
   vim.api.nvim_create_autocmd("WinClosed", {
