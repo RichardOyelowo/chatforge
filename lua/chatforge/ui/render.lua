@@ -2,8 +2,6 @@ local M     = {}
 local state = require("chatforge.core.state")
 local NL    = "\n"
  
-local NS = vim.api.nvim_create_namespace("chatforge_code")
- 
 local function buf_line_count(b)
   return vim.api.nvim_buf_line_count(b)
 end
@@ -28,14 +26,21 @@ local function append(lines)
     vim.api.nvim_win_set_cursor(state.chat_winnr, { buf_line_count(b), 0 })
   end
 end
- 
-local function highlight_code_lines(first, last)
-  local b = state.chat_bufnr
-  if not b then return end
-  vim.api.nvim_set_hl(0, "ChatforgeCode", { link = "DiffAdd", default = true })
-  for lnum = first, last - 1 do
-    vim.api.nvim_buf_add_highlight(b, NS, "ChatforgeCode", lnum, 0, -1)
+
+local function chat_safe_text(content)
+  local out = {}
+  local in_code = false
+  for _, line in ipairs(vim.split(content, NL, { plain = true })) do
+    if line:match("^```") then
+      if not in_code then
+        table.insert(out, "[code hidden from chat pane]")
+      end
+      in_code = not in_code
+    elseif not in_code then
+      table.insert(out, line)
+    end
   end
+  return table.concat(out, NL)
 end
  
 function M.write_header()
@@ -43,9 +48,11 @@ function M.write_header()
   if not b then return end
   vim.api.nvim_buf_set_option(b, "modifiable", true)
   vim.api.nvim_buf_set_lines(b, 0, -1, false, {
-    "# chatforge",
+    "chatforge",
+    "---------",
     "",
-    "  :ChatSend <message>   send     :ChatReset   new chat     :ChatSetModel   set model",
+    "Ask in the message box below. Generated code is kept out of this pane.",
+    "Apply writes into the source file; Reject discards the pending implementation.",
     "",
     "---",
     "",
@@ -55,11 +62,11 @@ end
  
 function M.append_user(content, model)
   local lines = {
-    string.format("**You** _(model: %s)_:", model or "?"),
-    "",
+    string.format("You  [%s]", model or "?"),
+    "----------------",
   }
-  for _, l in ipairs(vim.split(content, NL, { plain = true })) do
-    table.insert(lines, "> " .. l)
+  for _, l in ipairs(vim.split(chat_safe_text(content), NL, { plain = true })) do
+    table.insert(lines, "  " .. l)
   end
   table.insert(lines, "")
   append(lines)
@@ -69,63 +76,64 @@ function M.append_segments(segments)
   local b = state.chat_bufnr
   if not b then return end
  
-  local lines       = { "**Assistant:**", "" }
-  local code_ranges = {}
+  local lines = { "Assistant", "---------" }
+  local n_blocks = 0
+  local has_actions = false
+  local staged_hint_rendered = false
  
   for _, seg in ipairs(segments) do
     if seg.type == "text" then
       for _, l in ipairs(vim.split(seg.content, NL, { plain = true })) do
-        table.insert(lines, l)
+        if l:match("%S") then
+          table.insert(lines, "  " .. l)
+        end
       end
  
     elseif seg.type == "code" then
-      local block_start = #lines
-      local block_index = seg.index or (#code_ranges + 1)
-      table.insert(lines, "```" .. (seg.lang or ""))
-      for _, l in ipairs(vim.split(seg.content, NL, { plain = true })) do
-        table.insert(lines, l)
-      end
-      table.insert(lines, "```")
-      local block_end = #lines
-      table.insert(lines, string.format(
-        "  [ Preview #%d ]  [ Apply #%d ]  [ Diff #%d ]  [ Yank #%d ]",
-        block_index, block_index, block_index, block_index
-      ))
+      local block_index = seg.index or (n_blocks + 1)
+      n_blocks = n_blocks + 1
+      local block = state.pending_blocks[block_index]
       table.insert(lines, "")
-      table.insert(code_ranges, { block_start, block_end })
+      if block and block.stageable == false then
+        table.insert(lines, string.format("  Example code #%d hidden from chat pane.", block_index))
+        table.insert(lines, "  Ask for an edit, fix, refactor, or selected-range rewrite to stage changes in the file.")
+      else
+        table.insert(lines, string.format("  Implementation #%d ready", block_index))
+        if not staged_hint_rendered then
+          table.insert(lines, "  It will be staged directly in the source buffer for review.")
+        else
+          table.insert(lines, "  Only one implementation is staged at a time.")
+        end
+      end
+      local suffix = ""
+      if block and block.target_file then
+        suffix = " -> " .. block.target_file
+      end
+      if (not block or block.stageable ~= false) and not staged_hint_rendered then
+        has_actions = true
+        staged_hint_rendered = true
+        table.insert(lines, string.format(
+          "  :ChatApply %d    :ChatReject    :ChatDiff %d%s",
+          block_index, block_index, suffix
+        ))
+      end
     end
   end
  
-  local n_blocks = #code_ranges
- 
-  if n_blocks > 0 then
+  if n_blocks > 0 and has_actions then
     table.insert(lines, "")
-    if n_blocks == 1 then
-      table.insert(lines, "  Put the cursor on an action above and run :ChatActivate, or use :ChatApply / :ChatDiff / :ChatReject")
-    else
-      local previews = {}
-      for i = 1, n_blocks do
-        table.insert(previews, string.format(":ChatPreview %d", i))
-      end
-      table.insert(lines, "  " .. table.concat(previews, "   "))
-      table.insert(lines, "  :ChatApply N   :ChatDiff N   :ChatReject")
-    end
+    table.insert(lines, "  Staged changes are highlighted in the source buffer until Apply or Reject.")
     table.insert(lines, "")
   end
  
   table.insert(lines, "---")
   table.insert(lines, "")
  
-  local buf_offset = buf_line_count(b)
   append(lines)
- 
-  for _, range in ipairs(code_ranges) do
-    highlight_code_lines(buf_offset + range[1], buf_offset + range[2])
-  end
 end
  
 function M.append_status(msg, kind)
-  local prefix = (kind == "error") and "⚠  " or "⋯  "
+  local prefix = (kind == "error") and "!  " or "...  "
   append({ "*" .. prefix .. msg .. "*", "" })
 end
  
