@@ -31,6 +31,8 @@ local function create_input_buf()
 end
  
 local INPUT_HEIGHT = 6
+local completion_cache_cwd = nil
+local completion_cache_items = nil
 
 local function open_chat_column(chat_bufnr, input_bufnr)
   vim.cmd("botright vsplit")
@@ -102,6 +104,10 @@ end
 
 local function completion_items()
   local cwd = vim.fn.getcwd()
+  if completion_cache_cwd == cwd and completion_cache_items then
+    return completion_cache_items
+  end
+
   local found = vim.fn.globpath(cwd, "**/*", false, true)
   local items = {}
   local dirs = {}
@@ -135,6 +141,8 @@ local function completion_items()
     table.insert(items, item)
   end
 
+  completion_cache_cwd = cwd
+  completion_cache_items = items
   return items
 end
 
@@ -148,14 +156,18 @@ end
 local function trigger_at_completion()
   vim.schedule(function()
     if not state.input_is_open() then return end
+    if vim.fn.pumvisible() == 1 then return end
     local line = vim.api.nvim_get_current_line()
     local col = vim.fn.col(".") - 1
     local prefix = completion_prefix(line, col)
     if not prefix then return end
     local start_col = col - #prefix + 1
     local filtered = {}
+    local lower_prefix = prefix:lower()
     for _, item in ipairs(completion_items()) do
-      if item.word:lower():find(prefix:lower(), 1, true) == 1 then
+      local is_generic = item.menu == "chatforge"
+        and (lower_prefix == "@file " or lower_prefix == "@dir ")
+      if not is_generic and item.word:lower():find(lower_prefix, 1, true) == 1 then
         table.insert(filtered, item)
       end
     end
@@ -204,6 +216,25 @@ local function request_history(src_bufnr, current_prompt)
   table.insert(history, { role = "user", content = current_prompt })
   return history
 end
+
+local function render_history(src_bufnr)
+  local b = state.chat_bufnr
+  if not b or not vim.api.nvim_buf_is_valid(b) then return end
+
+  vim.api.nvim_buf_set_option(b, "modifiable", true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, {})
+  vim.api.nvim_buf_set_option(b, "modifiable", false)
+  render.write_header()
+
+  local model = state.get_model(src_bufnr)
+  for _, msg in ipairs(state.get_buf(src_bufnr).history) do
+    if msg.role == "user" then
+      render.append_user(msg.display or msg.content, model)
+    elseif msg.role == "assistant" then
+      render.append_assistant_text(msg.display or msg.content)
+    end
+  end
+end
  
 -- ── send flow ──────────────────────────────────────────────────────────────
  
@@ -232,6 +263,10 @@ local function do_send(src_bufnr, input)
   local dispatched = dispatcher.dispatch(input, src_bufnr)
   local edit_target = state.edit_target
   state.edit_target = nil
+  if edit_target then
+    src_bufnr = edit_target.bufnr
+    state.source_bufnr = src_bufnr
+  end
   local should_stage = edit_target ~= nil
     or dispatched.action == "edit_file"
     or dispatched.action == "create_file"
@@ -249,7 +284,7 @@ local function do_send(src_bufnr, input)
       log.err(err)
       return
     end
-    state.append_message(src_bufnr, "user", input)
+    state.append_message(src_bufnr, "user", dispatched.prompt, input)
     state.append_message(src_bufnr, "assistant", text)
     local segments = parser.parse(text)
     state.pending_blocks = {}
@@ -268,6 +303,7 @@ local function do_send(src_bufnr, input)
           applied = false,
           stageable = should_stage,
           target = edit_target,
+          target_bufnr = src_bufnr,
           target_file = parsed_action.target or dispatched.target,
           action = parsed_action.action,
         })
@@ -284,7 +320,7 @@ local function do_send(src_bufnr, input)
     if not should_stage then
       focus_input()
     end
-  end)
+  end, request_id)
 
   return true
 end
@@ -320,6 +356,11 @@ local function setup_input_keymaps(bufnr)
   local opts = { noremap = true, silent = true, buffer = bufnr }
   vim.keymap.set("n", "<CR>", send_from_input, opts)
   vim.keymap.set("i", "<CR>", function()
+    if vim.fn.pumvisible() == 1 then
+      local keys = vim.api.nvim_replace_termcodes("<C-y>", true, false, true)
+      vim.api.nvim_feedkeys(keys, "n", false)
+      return
+    end
     vim.cmd("stopinsert")
     send_from_input()
   end, opts)
@@ -382,6 +423,10 @@ function M.open(src_bufnr)
     state.source_winnr = vim.api.nvim_get_current_win()
   end
   if state.chat_is_open() then
+    if state.chat_source_bufnr ~= state.source_bufnr then
+      render_history(state.source_bufnr)
+      state.chat_source_bufnr = state.source_bufnr
+    end
     focus_input()
     return
   end
@@ -391,6 +436,7 @@ function M.open(src_bufnr)
   local winnr, input_win = open_chat_column(bufnr, input_buf)
   state.chat_bufnr = bufnr
   state.chat_winnr = winnr
+  state.chat_source_bufnr = state.source_bufnr
   state.input_bufnr = input_buf
   state.input_winnr = input_win
   setup_input_autocmds(input_buf)
@@ -405,6 +451,7 @@ function M.open(src_bufnr)
       state.input_winnr = nil
       state.input_bufnr = nil
       state.chat_bufnr = nil
+      state.chat_source_bufnr = nil
       if vim.api.nvim_buf_is_valid(input_buf) then
         pcall(vim.api.nvim_buf_delete, input_buf, { force = true })
       end
