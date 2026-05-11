@@ -22,7 +22,9 @@ local function append(lines)
   vim.api.nvim_buf_set_lines(b, -1, -1, false, flat)
   vim.api.nvim_buf_set_option(b, "modifiable", false)
  
-  if state.chat_winnr and vim.api.nvim_win_is_valid(state.chat_winnr) then
+  if state.chat_winnr
+      and vim.api.nvim_win_is_valid(state.chat_winnr)
+      and vim.api.nvim_win_get_buf(state.chat_winnr) == b then
     vim.api.nvim_win_set_cursor(state.chat_winnr, { buf_line_count(b), 0 })
   end
 end
@@ -129,6 +131,19 @@ function M.append_segments(segments)
   table.insert(lines, "---")
   table.insert(lines, "")
  
+  append(lines)
+end
+
+function M.append_assistant_text(content)
+  local lines = { "Assistant", "---------" }
+  for _, l in ipairs(vim.split(chat_safe_text(content), NL, { plain = true })) do
+    if l:match("%S") then
+      table.insert(lines, "  " .. l)
+    end
+  end
+  table.insert(lines, "")
+  table.insert(lines, "---")
+  table.insert(lines, "")
   append(lines)
 end
  
