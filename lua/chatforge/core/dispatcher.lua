@@ -113,7 +113,7 @@ local function resolve_at_mentions(input, src_bufnr)
   end)
 
   -- 2. @file <path>: path ends at whitespace or end of string
-  for tag, path in input:gmatch("(@[fF][iI][lL][eE]%s+(%S+))") do
+  for tag, path in resolved:gmatch("(@[fF][iI][lL][eE]%s+(%S+))") do
     local block
     if is_current_file_ref(path) then
       -- / or . → inject current buffer content (in-memory, not read from disk)
@@ -137,7 +137,7 @@ local function resolve_at_mentions(input, src_bufnr)
   end
 
   -- 3. @dir <path>: always cwd-anchored
-  for tag, path in input:gmatch("(@[dD][iI][rR]%s+(%S+))") do
+  for tag, path in resolved:gmatch("(@[dD][iI][rR]%s+(%S+))") do
     local listing, err = read_dir(path)
     if err then
       local msg = "\n<!-- @dir " .. path .. " could not be read: " .. err .. " -->"
