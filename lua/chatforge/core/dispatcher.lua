@@ -45,7 +45,7 @@ local function is_current_file_ref(path)
 end
 
 -- Resolve a dir path relative to cwd.
--- "/" and "." both mean cwd — no way to escape outside the project root
+-- "/" and "." both mean cwd. No way to escape outside the project root.
 -- by accident. "/src" means cwd/src, not filesystem /src.
 local function resolve_dir_path(path)
   local cwd = vim.fn.getcwd()
@@ -57,7 +57,7 @@ local function resolve_dir_path(path)
   if stripped then
     return cwd .. "/" .. stripped
   end
-  -- relative path — resolve from cwd
+  -- relative path: resolve from cwd
   return cwd .. "/" .. path
 end
 
@@ -87,7 +87,7 @@ local function resolve_at_mentions(input, src_bufnr)
   local injections = {}
   local resolved   = input
 
-  -- 1. Bare @file with no path — replace before the path-based loop
+  -- 1. Bare @file with no path: replace before the path-based loop
   --    Pattern: @file not followed by non-whitespace (end of string or space/newline next)
   resolved = resolved:gsub("(@[fF][iI][lL][eE])(%s+[%./]?%s*$)", function(tag, _)
     return tag .. " /"  -- normalise to @file / so the path loop handles it
@@ -101,7 +101,7 @@ local function resolve_at_mentions(input, src_bufnr)
     return string.format("\n\nFile: %s\n```%s\n%s\n```", name ~= "" and name or "(unnamed)", ft, content)
   end)
 
-  -- 2. @file <path> — path ends at whitespace or end of string
+  -- 2. @file <path>: path ends at whitespace or end of string
   for tag, path in input:gmatch("(@[fF][iI][lL][eE]%s+(%S+))") do
     local block
     if is_current_file_ref(path) then
@@ -112,7 +112,7 @@ local function resolve_at_mentions(input, src_bufnr)
       block = string.format("\n\nFile: %s\n```%s\n%s\n```", name ~= "" and name or "(unnamed)", ft, content)
       table.insert(injections, { tag = "@file", path = path .. " (current buffer)", ok = true })
     else
-      -- explicit path — read from disk exactly as written
+      -- explicit path: read from disk exactly as written
       local contents, err = read_file(path)
       if err then
         block = "\n<!-- @file " .. path .. " could not be read: " .. err .. " -->"
@@ -125,7 +125,7 @@ local function resolve_at_mentions(input, src_bufnr)
     resolved = resolved:gsub(vim.pesc(tag), block, 1)
   end
 
-  -- 3. @dir <path> — always cwd-anchored
+  -- 3. @dir <path>: always cwd-anchored
   for tag, path in input:gmatch("(@[dD][iI][rR]%s+(%S+))") do
     local listing, err = read_dir(path)
     if err then
