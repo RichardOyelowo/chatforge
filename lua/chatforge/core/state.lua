@@ -10,7 +10,14 @@ M.input_winnr   = nil  ---@type number|nil
 M.source_bufnr  = nil  ---@type number|nil
 M.source_winnr  = nil  ---@type number|nil
 M.loading       = false
-M.pending_blocks = {}  ---@type {lang:string,content:string,applied:boolean}[]
+M.applying      = false
+M.edit_target   = nil  ---@type {bufnr:number,line1:number,line2:number,kind:string}|nil
+M.pending_blocks = {}  ---@type {lang:string,content:string,applied:boolean,target:table|nil}[]
+M.staged_changes = {}  ---@type table<number, table>
+M.ollama_job = nil
+M.ollama_pull_job = nil
+M.ollama_job_stopping = false
+M.ollama_pull_job_stopping = false
 
 local config
 local function default_model()
@@ -35,6 +42,8 @@ end
 function M.clear(bufnr)
   if M.buffers[bufnr] then M.buffers[bufnr].history = {} end
   M.pending_blocks = {}
+  M.staged_changes = {}
+  M.edit_target = nil
 end
 
 function M.chat_is_open()
