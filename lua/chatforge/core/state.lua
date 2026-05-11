@@ -1,6 +1,6 @@
 local M = {}
 
----@type table<number, { model:string, history:{role:string,content:string}[] }>
+---@type table<number, { model:string, history:{role:string,content:string,display:string|nil}[] }>
 M.buffers = {}
 
 M.chat_bufnr    = nil  ---@type number|nil
@@ -9,6 +9,7 @@ M.input_bufnr   = nil  ---@type number|nil
 M.input_winnr   = nil  ---@type number|nil
 M.source_bufnr  = nil  ---@type number|nil
 M.source_winnr  = nil  ---@type number|nil
+M.chat_source_bufnr = nil  ---@type number|nil
 M.loading       = false
 M.request_id    = 0
 M.applying      = false
@@ -36,8 +37,8 @@ end
 function M.get_model(bufnr)   return M.get_buf(bufnr).model end
 function M.set_model(bufnr, model) M.get_buf(bufnr).model = model end
 
-function M.append_message(bufnr, role, content)
-  table.insert(M.get_buf(bufnr).history, { role = role, content = content })
+function M.append_message(bufnr, role, content, display)
+  table.insert(M.get_buf(bufnr).history, { role = role, content = content, display = display })
 end
 
 function M.clear(bufnr)
