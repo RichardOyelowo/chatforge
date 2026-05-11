@@ -25,40 +25,7 @@ function M.pull_status()
 end
 
 function M.start_ollama()
-  if M.ollama_status() == "managed-running" then
-    notify("ollama serve is already running from this Neovim session.")
-    return
-  end
-
-  local job
-  job = vim.fn.jobstart({ "ollama", "serve" }, {
-    detach = false,
-    stdout_buffered = false,
-    stderr_buffered = false,
-    on_stderr = function(_, data)
-      if data and data[1] and data[1] ~= "" then
-        notify("ollama: " .. data[1], vim.log.levels.DEBUG)
-      end
-    end,
-    on_exit = function(_, code)
-      if state.ollama_job == job then
-        state.ollama_job = nil
-      end
-      local stopped = state.ollama_job_stopping
-      state.ollama_job_stopping = false
-      if code ~= 0 and not stopped then
-        notify("ollama serve stopped with code " .. code, vim.log.levels.WARN)
-      end
-    end,
-  })
-
-  if job <= 0 then
-    notify("Could not start `ollama serve`. Run it in a terminal.", vim.log.levels.ERROR)
-    return
-  end
-
-  state.ollama_job = job
-  notify("Started `ollama serve`. Stop it with :ChatBackend stop.")
+  notify("Run this in a terminal: ollama serve")
 end
 
 function M.stop_ollama()
@@ -89,15 +56,12 @@ function M.offer_ollama_start(reason)
   vim.schedule(function()
     local msg = reason or "Ollama is not reachable."
     vim.ui.select({
-      "Start `ollama serve` for this Neovim session",
-      "Show command only",
+      "Show command",
       "Ignore",
     }, {
       prompt = msg .. " What do you want to do?",
     }, function(choice)
-      if choice == "Start `ollama serve` for this Neovim session" then
-        M.start_ollama()
-      elseif choice == "Show command only" then
+      if choice == "Show command" then
         notify("Run this in a terminal: ollama serve")
       end
     end)
