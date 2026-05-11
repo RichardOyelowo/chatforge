@@ -21,6 +21,19 @@ function M.setup(opts)
   local actions  = require("chatforge.core.actions")
   local state    = require("chatforge.core.state")
   local backend_control = require("chatforge.api.backend_control")
+
+  local group = vim.api.nvim_create_augroup("chatforge_source_tracking", { clear = true })
+  vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
+    group = group,
+    callback = function()
+      local bufnr = vim.api.nvim_get_current_buf()
+      if state.is_plugin_buf(bufnr) or vim.bo[bufnr].buftype ~= "" then
+        return
+      end
+      state.source_bufnr = bufnr
+      state.source_winnr = vim.api.nvim_get_current_win()
+    end,
+  })
  
   -- ── :Chat ──────────────────────────────────────────────────────────────
   vim.api.nvim_create_user_command("Chat", function()
