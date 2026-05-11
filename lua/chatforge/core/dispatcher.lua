@@ -11,18 +11,17 @@ local buf_u = require("chatforge.utils.buffer")
 local MAX_AUTO_CONTEXT_LINES = 160
 
 local RULES = {
-  { pattern = "^create%s+file%s+(%S+)",  action = "create_file", capture = 1 },
-  { pattern = "^edit%s+file%s+(%S+)",    action = "edit_file",   capture = 1 },
-  { pattern = "^delete%s+file%s+(%S+)",  action = "delete_file", capture = 1 },
-  { pattern = "^explain%s+",             action = "explain" },
-  { pattern = "^fix%s+",                 action = "edit_file" },
-  { pattern = "^refactor%s+",            action = "edit_file" },
+  { pattern = "^[cC][rR][eE][aA][tT][eE]%s+[fF][iI][lL][eE]%s+(%S+)",  action = "create_file", capture = 1 },
+  { pattern = "^[eE][dD][iI][tT]%s+[fF][iI][lL][eE]%s+(%S+)",          action = "edit_file",   capture = 1 },
+  { pattern = "^[dD][eE][lL][eE][tT][eE]%s+[fF][iI][lL][eE]%s+(%S+)",  action = "delete_file", capture = 1 },
+  { pattern = "^[eE][xX][pP][lL][aA][iI][nN]%s+",                     action = "explain" },
+  { pattern = "^[fF][iI][xX]%s+",                                      action = "edit_file" },
+  { pattern = "^[rR][eE][fF][aA][cC][tT][oO][rR]%s+",                 action = "edit_file" },
 }
 
 local function classify(input)
-  local lower = input:lower()
   for _, rule in ipairs(RULES) do
-    local m = { lower:match(rule.pattern) }
+    local m = { input:match(rule.pattern) }
     if m[1] ~= nil then
       return rule.action, rule.capture and m[rule.capture] or nil
     end
