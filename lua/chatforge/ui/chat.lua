@@ -30,46 +30,51 @@ local function create_input_buf()
   return b
 end
  
-local function open_chat_win(bufnr)
+local INPUT_HEIGHT = 6
+
+local function open_chat_column(chat_bufnr, input_bufnr)
   vim.cmd("botright vsplit")
-  local w = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(w, bufnr)
-  vim.wo[w].wrap       = true
-  vim.wo[w].linebreak  = true
-  vim.wo[w].number     = false
-  vim.wo[w].signcolumn = "no"
-  vim.wo[w].winbar     = " chatforge "
+  local chat_w = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(chat_w, chat_bufnr)
+  vim.wo[chat_w].wrap       = true
+  vim.wo[chat_w].linebreak  = true
+  vim.wo[chat_w].number     = false
+  vim.wo[chat_w].relativenumber = false
+  vim.wo[chat_w].signcolumn = "no"
+  vim.wo[chat_w].winbar     = " chatforge "
   vim.cmd("vertical resize 65")
 
-  return w
-end
-
-local function input_window_opts()
-  local width = math.max(vim.api.nvim_win_get_width(state.chat_winnr) - 4, 24)
-  local height = 4
-  local chat_height = vim.api.nvim_win_get_height(state.chat_winnr)
-  return {
-    relative = "win",
-    win = state.chat_winnr,
-    row = math.max(chat_height - height - 2, 1),
-    col = 1,
-    width = width,
-    height = height,
-    style = "minimal",
-    border = "rounded",
-    title = " message ",
-    title_pos = "left",
-  }
-end
-
-local function open_input_win(input_bufnr)
-  local input_w = vim.api.nvim_open_win(input_bufnr, false, input_window_opts())
+  vim.cmd("belowright " .. INPUT_HEIGHT .. "split")
+  local input_w = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(input_w, input_bufnr)
   vim.wo[input_w].wrap       = true
   vim.wo[input_w].linebreak  = true
   vim.wo[input_w].number     = false
   vim.wo[input_w].relativenumber = false
   vim.wo[input_w].signcolumn = "no"
-  vim.wo[input_w].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder"
+  vim.wo[input_w].winfixheight = true
+  vim.wo[input_w].winbar = " message  |  Enter sends  |  Ctrl-j newline "
+  vim.cmd("resize " .. INPUT_HEIGHT)
+
+  return chat_w, input_w
+end
+
+local function open_input_split(input_bufnr)
+  if not state.chat_is_open() then
+    return nil
+  end
+  vim.api.nvim_set_current_win(state.chat_winnr)
+  vim.cmd("belowright " .. INPUT_HEIGHT .. "split")
+  local input_w = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(input_w, input_bufnr)
+  vim.wo[input_w].wrap       = true
+  vim.wo[input_w].linebreak  = true
+  vim.wo[input_w].number     = false
+  vim.wo[input_w].relativenumber = false
+  vim.wo[input_w].signcolumn = "no"
+  vim.wo[input_w].winfixheight = true
+  vim.wo[input_w].winbar = " message  |  Enter sends  |  Ctrl-j newline "
+  vim.cmd("resize " .. INPUT_HEIGHT)
   return input_w
 end
 
@@ -175,7 +180,7 @@ end
 
 local function focus_input()
   if state.input_bufnr and vim.api.nvim_buf_is_valid(state.input_bufnr) and state.chat_is_open() and not state.input_is_open() then
-    state.input_winnr = open_input_win(state.input_bufnr)
+    state.input_winnr = open_input_split(state.input_bufnr)
   end
 
   if state.input_is_open() then
@@ -383,11 +388,11 @@ function M.open(src_bufnr)
   local origin_win = vim.api.nvim_get_current_win()
   local bufnr      = create_chat_buf()
   local input_buf  = create_input_buf()
-  local winnr      = open_chat_win(bufnr)
+  local winnr, input_win = open_chat_column(bufnr, input_buf)
   state.chat_bufnr = bufnr
   state.chat_winnr = winnr
   state.input_bufnr = input_buf
-  state.input_winnr = open_input_win(input_buf)
+  state.input_winnr = input_win
   setup_input_autocmds(input_buf)
   setup_input_keymaps(input_buf)
   render.write_header()
@@ -409,6 +414,13 @@ function M.open(src_bufnr)
       if vim.api.nvim_win_is_valid(origin_win) then
         vim.api.nvim_set_current_win(origin_win)
       end
+    end,
+  })
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(input_win),
+    once = true,
+    callback = function()
+      state.input_winnr = nil
     end,
   })
   focus_input()
