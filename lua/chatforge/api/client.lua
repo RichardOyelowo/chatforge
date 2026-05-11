@@ -3,6 +3,7 @@ local config   = require("chatforge.config")
 local state    = require("chatforge.core.state")
 local backends = require("chatforge.api.backends")
 local log      = require("chatforge.utils.logger")
+local backend_control = require("chatforge.api.backend_control")
 
 --- Send messages to whatever backend the buffer has selected.
 ---@param src_bufnr number          source (non-chat) buffer
@@ -35,6 +36,11 @@ function M.complete(src_bufnr, messages, on_done)
 
   be.ask(cfg.ollama_url, model, full, function(text, err)
     state.loading = false
+    if err and err:match("Ollama unreachable") then
+      backend_control.offer_ollama_start(err)
+    elseif err and (err:lower():match("model") and (err:lower():match("not found") or err:lower():match("pull"))) then
+      backend_control.offer_model_pull(model, err)
+    end
     on_done(text, err)
   end)
 end
