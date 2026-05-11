@@ -1,6 +1,6 @@
 -- Commands:
 --   :Chat                   open / focus the chat window
---   :ChatSend [message]     no args = focus input pane, args = send, visual = send selection
+--   :ChatSend [message]     no args = focus input area, args = send, visual = send selection
 --   :ChatModel [model]      set model for current buffer, or open picker
 --   :ChatReset              clear history and reopen
 --   :ChatApply [N]          accept staged implementation N
@@ -41,7 +41,7 @@ function M.setup(opts)
   end, { desc = "Open chatforge window" })
  
   -- ── :ChatSend [message] ───────────────────────────────────────────────
-  -- No args      → focuses the right-side input pane
+  -- No args      → focuses the right-side input area
   -- With args    → sends the text directly
   -- Visual range → wraps selected lines in a code block and sends
   vim.api.nvim_create_user_command("ChatSend", function(cmd)
@@ -83,7 +83,7 @@ function M.setup(opts)
     else
       state.edit_target = nil
     end
-    -- input == nil  →  send_message focuses the right-side input pane
+    -- input == nil  →  send_message focuses the right-side input area
  
     chat.open(src)
     vim.defer_fn(function()
