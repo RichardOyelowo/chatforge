@@ -8,6 +8,8 @@ local M     = {}
 local log   = require("chatforge.utils.logger")
 local buf_u = require("chatforge.utils.buffer")
 
+local MAX_AUTO_CONTEXT_LINES = 160
+
 local RULES = {
   { pattern = "^create%s+file%s+(%S+)",  action = "create_file", capture = 1 },
   { pattern = "^edit%s+file%s+(%S+)",    action = "edit_file",   capture = 1 },
@@ -75,6 +77,15 @@ local function read_dir(path)
     table.insert(lines, string.format("  %s  %s", e.type == "directory" and "d" or "f", e.name))
   end
   return table.concat(lines, "\n"), nil
+end
+
+local function cursor_line_for_buffer(bufnr)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == bufnr then
+      return vim.api.nvim_win_get_cursor(win)[1]
+    end
+  end
+  return 1
 end
 
 -- Resolve all @file and @dir mentions in the input.
@@ -146,8 +157,26 @@ local function build_prompt(input, action, src_bufnr)
   local name = buf_u.get_name(src_bufnr)
 
   if action == "edit_file" or action == "explain" then
-    local content = buf_u.get_content(src_bufnr)
-    if content ~= "" then
+    local line_count = vim.api.nvim_buf_line_count(src_bufnr)
+    if line_count > MAX_AUTO_CONTEXT_LINES then
+      local cursor_line = cursor_line_for_buffer(src_bufnr)
+      local half = math.floor(MAX_AUTO_CONTEXT_LINES / 2)
+      local start_line = math.max(cursor_line - half, 1)
+      local end_line = math.min(start_line + MAX_AUTO_CONTEXT_LINES - 1, line_count)
+      start_line = math.max(end_line - MAX_AUTO_CONTEXT_LINES + 1, 1)
+      local lines = vim.api.nvim_buf_get_lines(src_bufnr, start_line - 1, end_line, false)
+      return string.format(
+        "%s\n\nFile: %s\nContext: lines %d-%d of %d. Use visual selection or @file for a different scope.\n```%s\n%s\n```",
+        input,
+        name ~= "" and name or "(unnamed)",
+        start_line,
+        end_line,
+        line_count,
+        ft,
+        table.concat(lines, "\n")
+      )
+    else
+      local content = buf_u.get_content(src_bufnr)
       return string.format("%s\n\nFile: %s\n```%s\n%s\n```",
         input, name ~= "" and name or "(unnamed)", ft, content)
     end
