@@ -26,6 +26,13 @@ local function visible_width()
   return CHAT_WIDTH
 end
 
+local function visible_height()
+  if state.chat_winnr and vim.api.nvim_win_is_valid(state.chat_winnr) then
+    return math.max(vim.api.nvim_win_get_height(state.chat_winnr), 12)
+  end
+  return 24
+end
+
 local function split_lines(content)
   local lines = {}
   for _, l in ipairs(vim.split(tostring(content or ""), NL, { plain = true })) do
@@ -122,11 +129,15 @@ end
 local function redraw(input_lines)
   local transcript = vim.deepcopy(state.chat_lines or {})
   local box = input_box_lines(input_lines or state.input_lines or { "" })
-  state.input_start_line = #transcript + 3
+  local filler_count = math.max(visible_height() - #transcript - #box, 0)
+  state.input_start_line = #transcript + filler_count + 3
   state.input_end_line = state.input_start_line + INPUT_HEIGHT - 1
 
   local lines = {}
   vim.list_extend(lines, transcript)
+  for _ = 1, filler_count do
+    table.insert(lines, "")
+  end
   vim.list_extend(lines, box)
   set_lines(lines)
   apply_highlights()
