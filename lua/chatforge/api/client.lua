@@ -9,7 +9,8 @@ local backend_control = require("chatforge.api.backend_control")
 ---@param src_bufnr number          source (non-chat) buffer
 ---@param messages  {role:string, content:string}[]
 ---@param on_done   fun(text:string|nil, err:string|nil)
-function M.complete(src_bufnr, messages, on_done)
+---@param request_id number|nil
+function M.complete(src_bufnr, messages, on_done, request_id)
   if state.loading then
     on_done(nil, "A request is already in progress.")
     return
@@ -35,6 +36,9 @@ function M.complete(src_bufnr, messages, on_done)
   log.log("client.complete: model=%s msgs=%d", model, #full)
 
   be.ask(cfg.ollama_url, model, full, function(text, err)
+    if request_id and request_id ~= state.request_id then
+      return
+    end
     state.loading = false
     if err and err:match("Ollama unreachable") then
       backend_control.offer_ollama_start(err)
