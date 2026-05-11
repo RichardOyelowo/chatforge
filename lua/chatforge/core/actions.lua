@@ -1,6 +1,10 @@
 local M     = {}
 local state = require("chatforge.core.state")
 local log   = require("chatforge.utils.logger")
+local render = require("chatforge.ui.render")
+local NS = vim.api.nvim_create_namespace("chatforge_proposed_change")
+
+vim.api.nvim_set_hl(0, "ChatforgeProposedChange", { link = "DiffText", default = true })
 
 -- ── helpers ────────────────────────────────────────────────────────────────
 
@@ -44,19 +48,66 @@ local function focus_source_window(bufnr)
   end
 end
 
-local function write_lines_live(bufnr, lines, on_done)
+local function block_target(idx, bufnr)
+  local block = state.pending_blocks[idx]
+  local target = block and block.target
+  if target and target.bufnr ~= bufnr then
+    target = nil
+  end
+  return target
+end
+
+local function block_while_applying(action)
+  if not state.applying then
+    return false
+  end
+  vim.notify("[chatforge] Wait for the staged implementation to finish writing before " .. action .. ".", vim.log.levels.WARN)
+  return true
+end
+
+local function edit_path(path)
+  local ok, err = pcall(vim.cmd, "edit " .. vim.fn.fnameescape(path))
+  if not ok then
+    vim.notify("[chatforge] Could not open " .. path .. ": " .. tostring(err), vim.log.levels.ERROR)
+    return false
+  end
+  return true
+end
+
+local function add_proposed_highlight(bufnr, start_idx, line_count)
+  vim.api.nvim_buf_clear_namespace(bufnr, NS, start_idx, start_idx + math.max(line_count, 1))
+  for lnum = start_idx, start_idx + line_count - 1 do
+    vim.api.nvim_buf_add_highlight(bufnr, NS, "ChatforgeProposedChange", lnum, 0, -1)
+  end
+end
+
+local function clear_proposed_highlight(change)
+  if change and change.bufnr and vim.api.nvim_buf_is_valid(change.bufnr) then
+    vim.api.nvim_buf_clear_namespace(change.bufnr, NS, 0, -1)
+  end
+end
+
+local function write_lines_live(bufnr, lines, target, opts, on_done)
+  opts = opts or {}
   focus_source_window(bufnr)
 
   local was_modifiable = vim.bo[bufnr].modifiable
   vim.bo[bufnr].modifiable = true
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
+  local start_idx = target and target.line1 and (target.line1 - 1) or 0
+  local end_idx = target and target.line2 or -1
+  local original = vim.api.nvim_buf_get_lines(bufnr, start_idx, end_idx, false)
+  vim.api.nvim_buf_set_lines(bufnr, start_idx, end_idx, false, {})
 
   local i = 1
   local chunk_size = 2
-  local wrote_any = false
+  local insert_at = start_idx
+  state.applying = true
+  render.append_status("Implementing in source buffer...")
 
   local function step()
     if not vim.api.nvim_buf_is_valid(bufnr) then
+      state.applying = false
+      render.remove_last_status()
       return
     end
 
@@ -69,23 +120,38 @@ local function write_lines_live(bufnr, lines, on_done)
 
     if #chunk > 0 then
       vim.bo[bufnr].modifiable = true
-      if wrote_any then
-        vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, chunk)
-      else
-        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, chunk)
-        wrote_any = true
+      vim.api.nvim_buf_set_lines(bufnr, insert_at, insert_at, false, chunk)
+      insert_at = insert_at + #chunk
+      if opts.highlight then
+        add_proposed_highlight(bufnr, start_idx, insert_at - start_idx)
       end
-      local lc = vim.api.nvim_buf_line_count(bufnr)
       if state.source_winnr and vim.api.nvim_win_is_valid(state.source_winnr) then
-        vim.api.nvim_win_set_cursor(state.source_winnr, { lc, 0 })
+        vim.api.nvim_win_set_cursor(state.source_winnr, { math.max(insert_at, 1), 0 })
       end
     end
 
     if i <= #lines then
       vim.defer_fn(step, 18)
     else
+      if not target then
+        local current = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        if #current > #lines and current[#current] == "" then
+          vim.api.nvim_buf_set_lines(bufnr, #current - 1, #current, false, {})
+        end
+      end
       vim.bo[bufnr].modifiable = was_modifiable
-      if on_done then on_done() end
+      state.applying = false
+      render.remove_last_status()
+      if on_done then
+        on_done({
+          bufnr = bufnr,
+          start_idx = start_idx,
+          end_idx = end_idx,
+          new_line_count = #lines,
+          original = original,
+          target = target,
+        })
+      end
     end
   end
 
@@ -97,6 +163,49 @@ end
 --- Apply block N to the current buffer (replaces entire contents).
 ---@param idx number  1-based index into state.pending_blocks
 function M.apply_to_current(idx)
+  if block_while_applying("applying") then
+    return
+  end
+
+  local staged = state.staged_changes[idx]
+  if staged then
+    clear_proposed_highlight(staged)
+    state.staged_changes[idx] = nil
+    if state.pending_blocks[idx] then
+      state.pending_blocks[idx].applied = true
+    end
+    render.append_status("Accepted implementation #" .. idx .. ".")
+    vim.notify("[chatforge] Accepted implementation #" .. idx, vim.log.levels.INFO)
+    return
+  end
+
+  local block = state.pending_blocks[idx]
+  if block and block.stageable == false then
+    vim.notify("[chatforge] That block is an example, not a staged implementation.", vim.log.levels.INFO)
+    return
+  end
+
+  if block then
+    vim.notify("[chatforge] Implementation #" .. idx .. " is not staged in the source buffer yet.", vim.log.levels.WARN)
+  else
+    vim.notify("[chatforge] No pending implementation #" .. idx .. ".", vim.log.levels.WARN)
+  end
+end
+
+function M.stage_preview(idx)
+  if block_while_applying("staging another change") then
+    return
+  end
+
+  if state.staged_changes[idx] then
+    return
+  end
+
+  local block = state.pending_blocks[idx]
+  if not block or block.stageable == false then
+    return
+  end
+
   local lines, err = get_block_lines(idx)
   if err then
     vim.notify("[chatforge] " .. err, vim.log.levels.WARN)
@@ -104,23 +213,39 @@ function M.apply_to_current(idx)
   end
 
   local bufnr = target_bufnr()
+  if block.target_file then
+    if state.source_winnr and vim.api.nvim_win_is_valid(state.source_winnr) then
+      vim.api.nvim_set_current_win(state.source_winnr)
+    end
+    if not edit_path(block.target_file) then
+      return
+    end
+    bufnr = vim.api.nvim_get_current_buf()
+    state.source_bufnr = bufnr
+    state.source_winnr = vim.api.nvim_get_current_win()
+  end
+
   if not bufnr then
     vim.notify("[chatforge] Open or focus a source buffer first.", vim.log.levels.WARN)
     return
   end
 
-  write_lines_live(bufnr, lines, function()
-    state.pending_blocks[idx].applied = true
-    vim.notify(string.format("[chatforge] Applied block #%d to %s",
-      idx, vim.api.nvim_buf_get_name(bufnr)), vim.log.levels.INFO)
+  local target = block_target(idx, bufnr)
+  write_lines_live(bufnr, lines, target, { highlight = true }, function(change)
+    state.staged_changes[idx] = change
+    render.append_status("Implementation #" .. idx .. " staged. Apply accepts; Reject restores.")
+    log.log("stage_preview: block=%d bufnr=%d", idx, bufnr)
   end)
-  log.log("apply_to_current: block=%d bufnr=%d", idx, bufnr)
 end
 
 --- Apply block N to a specific file path (writes to disk, opens buffer).
 ---@param idx    number
 ---@param fpath  string
 function M.apply_to_file(idx, fpath)
+  if block_while_applying("applying") then
+    return
+  end
+
   local lines, err = get_block_lines(idx)
   if err then
     vim.notify("[chatforge] " .. err, vim.log.levels.WARN)
@@ -132,12 +257,14 @@ function M.apply_to_file(idx, fpath)
   end
 
   -- Open (or create) the file in the source area and write it live.
-  vim.cmd("edit " .. vim.fn.fnameescape(fpath))
+  if not edit_path(fpath) then
+    return
+  end
   local bufnr = vim.api.nvim_get_current_buf()
   state.source_bufnr = bufnr
   state.source_winnr = vim.api.nvim_get_current_win()
 
-  write_lines_live(bufnr, lines, function()
+  write_lines_live(bufnr, lines, nil, { highlight = false }, function()
     vim.cmd("write")
     state.pending_blocks[idx].applied = true
     vim.notify("[chatforge] Written block #" .. idx .. " -> " .. fpath, vim.log.levels.INFO)
@@ -147,50 +274,80 @@ end
 --- Open a diff between block N and the current buffer in a new tab.
 ---@param idx number
 function M.diff_with_current(idx)
+  if block_while_applying("opening a diff") then
+    return
+  end
+
   local lines, err = get_block_lines(idx)
   if err then
     vim.notify("[chatforge] " .. err, vim.log.levels.WARN)
     return
   end
 
+  local staged = state.staged_changes[idx]
   local orig_bufnr = target_bufnr()
-  if not orig_bufnr then
-    vim.notify("[chatforge] Open or focus a source buffer first.", vim.log.levels.WARN)
-    return
+  local original_scratch = nil
+  local proposed_scratch = vim.api.nvim_create_buf(false, true)
+
+  vim.api.nvim_buf_set_lines(proposed_scratch, 0, -1, false, lines)
+
+  if staged and staged.bufnr and vim.api.nvim_buf_is_valid(staged.bufnr) then
+    original_scratch = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(original_scratch, 0, -1, false, staged.original)
+    vim.bo[original_scratch].filetype = vim.bo[staged.bufnr].filetype
+    vim.bo[proposed_scratch].filetype = vim.bo[staged.bufnr].filetype
+  else
+    if not orig_bufnr then
+      vim.notify("[chatforge] Open or focus a source buffer first.", vim.log.levels.WARN)
+      return
+    end
+    vim.bo[proposed_scratch].filetype = vim.bo[orig_bufnr].filetype
   end
 
-  -- Create a scratch buffer for the proposed code
-  local scratch = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(scratch, 0, -1, false, lines)
-  vim.bo[scratch].filetype = vim.bo[orig_bufnr].filetype
-
-  -- Open both in a diff-tab
   vim.cmd("tabnew")
-  vim.api.nvim_set_current_buf(orig_bufnr)
+  if original_scratch then
+    vim.api.nvim_set_current_buf(original_scratch)
+    vim.bo[original_scratch].buftype = "nofile"
+  else
+    vim.api.nvim_set_current_buf(orig_bufnr)
+  end
   vim.cmd("diffthis")
   vim.cmd("vsplit")
-  vim.api.nvim_set_current_buf(scratch)
+  vim.api.nvim_set_current_buf(proposed_scratch)
   vim.cmd("diffthis")
-  vim.bo[scratch].buftype = "nofile"
+  vim.bo[proposed_scratch].buftype = "nofile"
 
   vim.notify("[chatforge] Diff opened in new tab. :tabclose when done.", vim.log.levels.INFO)
 end
 
---- Yank block N to the unnamed register.
----@param idx number
-function M.yank(idx)
-  local lines, err = get_block_lines(idx)
-  if err then
-    vim.notify("[chatforge] " .. err, vim.log.levels.WARN)
-    return
-  end
-  vim.fn.setreg('"', table.concat(lines, "\n"))
-  vim.notify(string.format("[chatforge] Block #%d yanked to register.", idx), vim.log.levels.INFO)
-end
-
 --- Discard all pending blocks (Reject all).
 function M.reject_all()
+  if block_while_applying("rejecting") then
+    return
+  end
+
+  for idx, change in pairs(state.staged_changes) do
+    if change.bufnr and vim.api.nvim_buf_is_valid(change.bufnr) then
+      local was_modifiable = vim.bo[change.bufnr].modifiable
+      vim.bo[change.bufnr].modifiable = true
+      vim.api.nvim_buf_set_lines(
+        change.bufnr,
+        change.start_idx,
+        change.start_idx + change.new_line_count,
+        false,
+        change.original
+      )
+      vim.bo[change.bufnr].modifiable = was_modifiable
+      clear_proposed_highlight(change)
+    end
+    if state.pending_blocks[idx] then
+      state.pending_blocks[idx].applied = false
+    end
+  end
   state.pending_blocks = {}
+  state.staged_changes = {}
+  state.edit_target = nil
+  render.append_status("Rejected pending implementation.")
   vim.notify("[chatforge] All pending changes rejected.", vim.log.levels.INFO)
 end
 
