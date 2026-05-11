@@ -19,7 +19,7 @@ local function get_block_lines(idx)
   return vim.split(block.content, "\n"), nil
 end
 
-local function target_bufnr()
+local function fallback_target_bufnr()
   local current = vim.api.nvim_get_current_buf()
   if not state.is_plugin_buf(current) then
     return current
@@ -28,6 +28,14 @@ local function target_bufnr()
     return state.source_bufnr
   end
   return nil
+end
+
+local function target_bufnr_for_block(idx)
+  local block = state.pending_blocks[idx]
+  if block and block.target_bufnr and vim.api.nvim_buf_is_valid(block.target_bufnr) then
+    return block.target_bufnr
+  end
+  return fallback_target_bufnr()
 end
 
 local function focus_source_window(bufnr)
@@ -212,7 +220,7 @@ function M.stage_preview(idx)
     return
   end
 
-  local bufnr = target_bufnr()
+  local bufnr = target_bufnr_for_block(idx)
   if block.target_file then
     if state.source_winnr and vim.api.nvim_win_is_valid(state.source_winnr) then
       vim.api.nvim_set_current_win(state.source_winnr)
@@ -221,6 +229,7 @@ function M.stage_preview(idx)
       return
     end
     bufnr = vim.api.nvim_get_current_buf()
+    block.target_bufnr = bufnr
     state.source_bufnr = bufnr
     state.source_winnr = vim.api.nvim_get_current_win()
   end
@@ -285,7 +294,7 @@ function M.diff_with_current(idx)
   end
 
   local staged = state.staged_changes[idx]
-  local orig_bufnr = target_bufnr()
+  local orig_bufnr = target_bufnr_for_block(idx)
   local original_scratch = nil
   local proposed_scratch = vim.api.nvim_create_buf(false, true)
 
