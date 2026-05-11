@@ -10,6 +10,7 @@ M.input_winnr   = nil  ---@type number|nil
 M.source_bufnr  = nil  ---@type number|nil
 M.source_winnr  = nil  ---@type number|nil
 M.loading       = false
+M.request_id    = 0
 M.applying      = false
 M.edit_target   = nil  ---@type {bufnr:number,line1:number,line2:number,kind:string}|nil
 M.pending_blocks = {}  ---@type {lang:string,content:string,applied:boolean,target:table|nil}[]
