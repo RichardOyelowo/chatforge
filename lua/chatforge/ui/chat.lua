@@ -12,10 +12,10 @@ local log        = require("chatforge.utils.logger")
 local function create_chat_buf()
   local b = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_name(b, "AI Chat " .. b)
-  vim.bo[b].filetype   = "markdown"
+  vim.bo[b].filetype   = "chatforge"
   vim.bo[b].buftype    = "nofile"
   vim.bo[b].swapfile   = false
-  vim.bo[b].modifiable = false
+  vim.bo[b].modifiable = true
   return b
 end
 
@@ -54,7 +54,7 @@ local function clear_input()
   state.input_lines = { "" }
   render.redraw_input(state.input_lines)
   if state.input_is_open() then
-    vim.api.nvim_win_set_cursor(state.chat_winnr, { state.input_start_line, 2 })
+    vim.api.nvim_win_set_cursor(state.chat_winnr, { state.input_start_line, 3 })
   end
 end
 
@@ -68,7 +68,7 @@ end
 
 local function set_chat_modifiable(enabled)
   if state.chat_bufnr and vim.api.nvim_buf_is_valid(state.chat_bufnr) then
-    vim.bo[state.chat_bufnr].modifiable = enabled
+    vim.bo[state.chat_bufnr].modifiable = true
   end
 end
 
@@ -130,7 +130,7 @@ local function trigger_at_completion()
     if not input_cursor_ok() then
       return
     end
-    local line = vim.api.nvim_get_current_line():gsub("^|%s?", ""):gsub("%s*|$", "")
+    local line = vim.api.nvim_get_current_line():gsub("^>%s?", "")
     local actual_col = vim.fn.col(".") - 1
     local col = math.max(actual_col - 2, 0)
     local prefix = completion_prefix(line, col)
@@ -159,7 +159,7 @@ local function setup_input_autocmds(bufnr)
       if not input_cursor_ok() then
         return
       end
-      local line = vim.api.nvim_get_current_line():gsub("^|%s?", ""):gsub("%s*|$", "")
+      local line = vim.api.nvim_get_current_line():gsub("^>%s?", "")
       local col = math.max(vim.fn.col(".") - 3, 0)
       if completion_prefix(line, col) then
         trigger_at_completion()
@@ -171,7 +171,7 @@ end
 local function focus_input()
   if state.input_is_open() then
     vim.api.nvim_set_current_win(state.chat_winnr)
-    vim.api.nvim_win_set_cursor(state.chat_winnr, { state.input_start_line, 2 })
+    vim.api.nvim_win_set_cursor(state.chat_winnr, { state.input_start_line, 3 })
     vim.cmd("startinsert")
   end
 end
@@ -246,7 +246,7 @@ local function read_input_lines()
   local raw = vim.api.nvim_buf_get_lines(b, start_idx, end_idx, false)
   local lines = {}
   for _, line in ipairs(raw) do
-    line = line:gsub("^|%s?", ""):gsub("%s*|$", "")
+    line = line:gsub("^>%s?", "")
     line = line:gsub("%s+$", "")
     table.insert(lines, line)
   end
@@ -408,8 +408,7 @@ local function setup_input_keymaps(bufnr)
       return
     end
     set_chat_modifiable(true)
-    vim.api.nvim_put({ "| " }, "l", true, true)
-    set_chat_modifiable(false)
+    vim.api.nvim_put({ "> " }, "l", true, true)
   end, opts)
   vim.keymap.set("i", "<BS>", function()
     if not input_cursor_ok() then
@@ -419,20 +418,7 @@ local function setup_input_keymaps(bufnr)
     set_chat_modifiable(true)
     local keys = vim.api.nvim_replace_termcodes("<BS>", true, false, true)
     vim.api.nvim_feedkeys(keys, "n", false)
-    vim.defer_fn(function() set_chat_modifiable(false) end, 0)
   end, opts)
-  vim.api.nvim_create_autocmd({ "InsertEnter", "CursorMovedI" }, {
-    buffer = bufnr,
-    callback = function()
-      set_chat_modifiable(input_cursor_ok())
-    end,
-  })
-  vim.api.nvim_create_autocmd("InsertLeave", {
-    buffer = bufnr,
-    callback = function()
-      set_chat_modifiable(false)
-    end,
-  })
 end
 
 -- input == nil: focus the right-side input area
@@ -473,7 +459,6 @@ function M.reset(src_bufnr)
   if b and vim.api.nvim_buf_is_valid(b) then
     vim.api.nvim_buf_set_option(b, "modifiable", true)
     vim.api.nvim_buf_set_lines(b, 0, -1, false, {})
-    vim.api.nvim_buf_set_option(b, "modifiable", false)
     render.write_header()
   end
   clear_input()
