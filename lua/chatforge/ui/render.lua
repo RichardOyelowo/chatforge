@@ -3,10 +3,10 @@ local state = require("chatforge.core.state")
 local NL    = "\n"
 
 local CHAT_WIDTH = 58
-local INPUT_HEIGHT = 5
+local INPUT_HEIGHT = 4
 
-vim.api.nvim_set_hl(0, "ChatforgeUserBubble", { link = "Visual", default = true })
-vim.api.nvim_set_hl(0, "ChatforgeAssistantBubble", { link = "NormalFloat", default = true })
+vim.api.nvim_set_hl(0, "ChatforgeUserBubble", { link = "Identifier", default = true })
+vim.api.nvim_set_hl(0, "ChatforgeAssistantBubble", { link = "Normal", default = true })
 vim.api.nvim_set_hl(0, "ChatforgeInputBox", { link = "FloatBorder", default = true })
 vim.api.nvim_set_hl(0, "ChatforgeMuted", { link = "Comment", default = true })
 vim.api.nvim_set_hl(0, "ChatforgeStatus", { link = "DiagnosticInfo", default = true })
@@ -82,18 +82,16 @@ local function set_lines(lines)
   if not b then return end
   vim.bo[b].modifiable = true
   vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
-  vim.bo[b].modifiable = false
 end
 
 local function input_box_lines(input_lines)
   local width = visible_width()
   local top = "+" .. string.rep("-", width - 2) .. "+"
-  local title = "| message" .. string.rep(" ", math.max(width - 29, 1)) .. "Enter sends | Ctrl-j newline |"
-  local lines = { "", top, title }
+  local lines = { "", top }
   for i = 1, INPUT_HEIGHT do
     local content = input_lines[i] or ""
     content = content:sub(1, width - 4)
-    table.insert(lines, "| " .. content .. string.rep(" ", math.max(width - #content - 3, 0)) .. "|")
+    table.insert(lines, "> " .. content)
   end
   table.insert(lines, top)
   return lines
@@ -124,7 +122,7 @@ end
 local function redraw(input_lines)
   local transcript = vim.deepcopy(state.chat_lines or {})
   local box = input_box_lines(input_lines or state.input_lines or { "" })
-  state.input_start_line = #transcript + 4
+  state.input_start_line = #transcript + 3
   state.input_end_line = state.input_start_line + INPUT_HEIGHT - 1
 
   local lines = {}
@@ -151,13 +149,13 @@ local function append_transcript(lines, kind)
       and vim.api.nvim_win_is_valid(state.chat_winnr)
       and vim.api.nvim_win_get_buf(state.chat_winnr) == state.chat_bufnr then
     local cursor_line = state.input_start_line
-    vim.api.nvim_win_set_cursor(state.chat_winnr, { cursor_line, 2 })
+    vim.api.nvim_win_set_cursor(state.chat_winnr, { cursor_line, 3 })
   end
 end
 
-local function bubble(content, opts)
+local function message_lines(content, opts)
   opts = opts or {}
-  local width = math.min(visible_width() - 8, opts.width or 42)
+  local width = math.min(visible_width() - 10, opts.width or 44)
   local body = {}
   for _, line in ipairs(split_lines(chat_safe_text(content))) do
     for _, wrapped in ipairs(wrap_line(line, width)) do
@@ -169,27 +167,23 @@ local function bubble(content, opts)
     body = { "" }
   end
 
-  local max_len = 0
-  for _, line in ipairs(body) do
-    max_len = math.max(max_len, #line)
-  end
-  max_len = math.max(max_len, #opts.label)
-
   local full_width = visible_width()
-  local pad_left = 0
+  local label = opts.label or ""
+  local lines = { "" }
+
   if opts.align == "right" then
-    pad_left = math.max(full_width - max_len - 6, 0)
+    local label_pad = math.max(full_width - #label, 0)
+    table.insert(lines, string.rep(" ", label_pad) .. label)
+    for _, line in ipairs(body) do
+      local pad = math.max(full_width - #line, 0)
+      table.insert(lines, string.rep(" ", pad) .. line)
+    end
+  else
+    table.insert(lines, label)
+    for _, line in ipairs(body) do
+      table.insert(lines, line)
+    end
   end
-  local prefix = string.rep(" ", pad_left)
-  local lines = {
-    "",
-    prefix .. opts.label,
-    prefix .. "+" .. string.rep("-", max_len + 2) .. "+",
-  }
-  for _, line in ipairs(body) do
-    table.insert(lines, prefix .. "| " .. line .. string.rep(" ", max_len - #line) .. " |")
-  end
-  table.insert(lines, prefix .. "+" .. string.rep("-", max_len + 2) .. "+")
   return lines
 end
 
@@ -213,7 +207,7 @@ end
 
 function M.append_user(content, model)
   local label = string.format("You [%s]", model or "?")
-  append_transcript(bubble(content, { label = label, align = "right", width = 38 }), "user")
+  append_transcript(message_lines(content, { label = label, align = "right", width = 38 }), "user")
 end
 
 function M.append_segments(segments)
@@ -253,16 +247,16 @@ function M.append_segments(segments)
     table.insert(text_parts, "Generated code is staged in the source buffer and highlighted until Apply or Reject.")
   end
 
-  append_transcript(bubble(table.concat(text_parts, "\n\n"), { label = "Assistant", align = "left", width = 44 }), "assistant")
+  append_transcript(message_lines(table.concat(text_parts, "\n\n"), { label = "Assistant", align = "left", width = 44 }), "assistant")
 end
 
 function M.append_assistant_text(content)
-  append_transcript(bubble(content, { label = "Assistant", align = "left", width = 44 }), "assistant")
+  append_transcript(message_lines(content, { label = "Assistant", align = "left", width = 44 }), "assistant")
 end
 
 function M.append_status(msg, kind)
   local label = kind == "error" and "Error" or "Status"
-  local lines = bubble(msg, { label = label, align = "left", width = 42 })
+  local lines = message_lines(msg, { label = label, align = "left", width = 42 })
   local start_idx = #(state.chat_lines or {}) + 1
   append_transcript(lines, "status")
   state.last_status_span = { start = start_idx, finish = start_idx + #lines - 1 }
