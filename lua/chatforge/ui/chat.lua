@@ -6,6 +6,7 @@ local dispatcher = require("chatforge.core.dispatcher")
 local parser     = require("chatforge.core.parser")
 local actions    = require("chatforge.core.actions")
 local log        = require("chatforge.utils.logger")
+local config     = require("chatforge.config")
  
 -- ── buffer / window ────────────────────────────────────────────────────────
  
@@ -206,11 +207,28 @@ local function setup_chat_keymaps(bufnr)
   local redirect = function()
     focus_input()
   end
-  for _, lhs in ipairs({ "i", "a", "I", "A", "o", "O", "s", "S", "c", "C" }) do
+  for _, lhs in ipairs({ "i", "a", "I", "A", "o", "O", "s", "S" }) do
     vim.keymap.set("n", lhs, redirect, opts)
   end
   vim.keymap.set("n", "<CR>", redirect, opts)
   vim.keymap.set("n", "gi", redirect, opts)
+
+  local mappings = config.values.mappings and config.values.mappings.diff or {}
+  if mappings.accept then
+    vim.keymap.set("n", mappings.accept, function()
+      actions.apply_to_current(1)
+    end, vim.tbl_extend("force", opts, { desc = "chatforge accept AI change" }))
+  end
+  if mappings.reject then
+    vim.keymap.set("n", mappings.reject, function()
+      actions.reject_all()
+    end, vim.tbl_extend("force", opts, { desc = "chatforge reject AI change" }))
+  end
+  if mappings.diff then
+    vim.keymap.set("n", mappings.diff, function()
+      actions.diff_with_current(1)
+    end, vim.tbl_extend("force", opts, { desc = "chatforge diff AI change" }))
+  end
 end
 
 local function has_staged_changes()
@@ -326,6 +344,57 @@ local function do_send(src_bufnr, input)
   local should_stage = edit_target ~= nil
     or dispatched.action == "edit_file"
     or dispatched.action == "create_file"
+
+  local stream = nil
+  if should_stage then
+    stream = {
+      buffer = "",
+      in_code = false,
+      started = false,
+      finished = false,
+      block = {
+        lang = "",
+        content = "",
+        applied = false,
+        stageable = true,
+        target = edit_target,
+        target_bufnr = src_bufnr,
+        target_file = dispatched.target,
+        action = dispatched.action,
+      },
+    }
+  end
+
+  local function consume_stream_delta(delta)
+    if not stream or stream.finished then
+      return
+    end
+
+    stream.buffer = stream.buffer .. delta
+    while true do
+      local newline = stream.buffer:find("\n", 1, true)
+      if not newline then
+        break
+      end
+      local line = stream.buffer:sub(1, newline - 1)
+      stream.buffer = stream.buffer:sub(newline + 1)
+
+      if not stream.in_code then
+        local lang = line:match("^```%s*(%S*)")
+        if lang then
+          stream.in_code = true
+          stream.started = actions.start_stream_preview(1, stream.block)
+        end
+      elseif line:match("^```") then
+        stream.in_code = false
+        stream.finished = true
+        actions.finish_stream_preview()
+      elseif stream.started then
+        stream.block.content = stream.block.content .. line .. "\n"
+        actions.append_stream_preview(line .. "\n")
+      end
+    end
+  end
  
   render.append_user(input, model)
   render.append_status("Thinking…")
@@ -342,8 +411,20 @@ local function do_send(src_bufnr, input)
     end
     state.append_message(src_bufnr, "user", dispatched.prompt, input)
     state.append_message(src_bufnr, "assistant", text)
+    if stream and stream.in_code and stream.started and not stream.finished then
+      if stream.buffer ~= "" and not stream.buffer:match("^```") then
+        stream.block.content = stream.block.content .. stream.buffer
+        actions.append_stream_preview(stream.buffer)
+      end
+      actions.finish_stream_preview()
+      stream.finished = true
+    end
     local segments = parser.parse(text)
-    state.pending_blocks = {}
+    if not stream or not stream.finished then
+      state.pending_blocks = {}
+    else
+      state.pending_blocks = { stream.block }
+    end
     local actions_by_block = {}
     for _, seg in ipairs(segments) do
       if seg.type == "action" then
@@ -357,22 +438,32 @@ local function do_send(src_bufnr, input)
         if should_stage and not edit_target and not parsed_action.target and not dispatched.target then
           stageable = looks_like_full_file(seg.content, src_bufnr)
         end
-        table.insert(state.pending_blocks, {
-          lang = seg.lang,
-          content = seg.content,
-          applied = false,
-          stageable = stageable,
-          target = edit_target,
-          target_bufnr = src_bufnr,
-          target_file = parsed_action.target or dispatched.target,
-          action = parsed_action.action,
-        })
+        if not stream or not stream.finished then
+          table.insert(state.pending_blocks, {
+            lang = seg.lang,
+            content = seg.content,
+            applied = false,
+            stageable = stageable,
+            target = edit_target,
+            target_bufnr = src_bufnr,
+            target_file = parsed_action.target or dispatched.target,
+            action = parsed_action.action,
+          })
+        else
+          stream.block.lang = seg.lang
+          stream.block.content = seg.content
+          stream.block.target_file = parsed_action.target or dispatched.target
+          stream.block.action = parsed_action.action
+        end
       end
     end
     log.log("pending_blocks=%d", #state.pending_blocks)
     render.append_segments(segments)
+    if stream and stream.finished and state.staged_changes[1] then
+      render.append_status("Implementation #1 staged. Press ca to accept, co to reject, cd to diff.")
+    end
     for i, block in ipairs(state.pending_blocks) do
-      if block.stageable then
+      if block.stageable and not state.staged_changes[i] then
         actions.stage_preview(i)
         break
       end
@@ -380,7 +471,10 @@ local function do_send(src_bufnr, input)
     if not should_stage then
       focus_input()
     end
-  end, request_id)
+  end, request_id, {
+    stream = should_stage,
+    on_delta = consume_stream_delta,
+  })
 
   return true
 end
@@ -438,6 +532,23 @@ local function setup_input_keymaps(bufnr)
     end
     vim.api.nvim_put({ "" }, "l", true, true)
   end, opts)
+
+  local mappings = config.values.mappings and config.values.mappings.diff or {}
+  if mappings.accept then
+    vim.keymap.set("n", mappings.accept, function()
+      actions.apply_to_current(1)
+    end, vim.tbl_extend("force", opts, { desc = "chatforge accept AI change" }))
+  end
+  if mappings.reject then
+    vim.keymap.set("n", mappings.reject, function()
+      actions.reject_all()
+    end, vim.tbl_extend("force", opts, { desc = "chatforge reject AI change" }))
+  end
+  if mappings.diff then
+    vim.keymap.set("n", mappings.diff, function()
+      actions.diff_with_current(1)
+    end, vim.tbl_extend("force", opts, { desc = "chatforge diff AI change" }))
+  end
 end
 
 -- input == nil: focus the right-side input area

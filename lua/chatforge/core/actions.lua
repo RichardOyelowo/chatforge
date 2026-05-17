@@ -2,9 +2,10 @@ local M     = {}
 local state = require("chatforge.core.state")
 local log   = require("chatforge.utils.logger")
 local render = require("chatforge.ui.render")
+local config = require("chatforge.config")
 local NS = vim.api.nvim_create_namespace("chatforge_proposed_change")
 
-vim.api.nvim_set_hl(0, "ChatforgeProposedChange", { link = "DiffText", default = true })
+vim.api.nvim_set_hl(0, "ChatforgeProposedChange", { underline = true, sp = "#7aa2f7", default = true })
 
 -- ── helpers ────────────────────────────────────────────────────────────────
 
@@ -133,16 +134,95 @@ local function write_buffer_to_disk(bufnr)
   return true
 end
 
-local function add_proposed_highlight(bufnr, start_idx, line_count)
+local function proposed_hl()
+  local cfg = config.values or {}
+  return cfg.highlights
+    and cfg.highlights.diff
+    and cfg.highlights.diff.incoming
+    or "ChatforgeProposedChange"
+end
+
+local function changed_line_marks(original, proposed)
+  local marks = {}
+  local max_len = math.max(#original, #proposed)
+  for i = 1, max_len do
+    if original[i] ~= proposed[i] and proposed[i] ~= nil then
+      marks[i] = true
+    end
+  end
+  return marks
+end
+
+local function add_proposed_highlight(bufnr, start_idx, line_count, marks)
   vim.api.nvim_buf_clear_namespace(bufnr, NS, start_idx, start_idx + math.max(line_count, 1))
-  for lnum = start_idx, start_idx + line_count - 1 do
-    vim.api.nvim_buf_add_highlight(bufnr, NS, "ChatforgeProposedChange", lnum, 0, -1)
+  for offset = 0, line_count - 1 do
+    if not marks or marks[offset + 1] then
+      vim.api.nvim_buf_add_highlight(bufnr, NS, proposed_hl(), start_idx + offset, 0, -1)
+    end
   end
 end
 
 local function clear_proposed_highlight(change)
   if change and change.bufnr and vim.api.nvim_buf_is_valid(change.bufnr) then
     vim.api.nvim_buf_clear_namespace(change.bufnr, NS, 0, -1)
+  end
+end
+
+local function first_staged_idx()
+  local best = nil
+  for idx in pairs(state.staged_changes) do
+    if not best or idx < best then
+      best = idx
+    end
+  end
+  return best
+end
+
+local function jump_staged(direction)
+  local idx = first_staged_idx()
+  local change = idx and state.staged_changes[idx]
+  if not change or not change.bufnr or not vim.api.nvim_buf_is_valid(change.bufnr) then
+    vim.notify("[chatforge] No staged implementation to jump to.", vim.log.levels.INFO)
+    return
+  end
+  focus_source_window(change.bufnr)
+  local line = direction == "prev" and change.start_idx + 1
+    or change.start_idx + math.max(change.new_line_count, 1)
+  vim.api.nvim_win_set_cursor(state.source_winnr, { math.max(line, 1), 0 })
+end
+
+local function setup_review_keymaps(bufnr)
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  local cfg = config.values or {}
+  local mappings = cfg.mappings and cfg.mappings.diff or {}
+  local opts = { noremap = true, silent = true, buffer = bufnr }
+
+  if mappings.accept then
+    vim.keymap.set("n", mappings.accept, function()
+      M.apply_to_current(first_staged_idx() or 1)
+    end, vim.tbl_extend("force", opts, { desc = "chatforge accept AI change" }))
+  end
+  if mappings.reject then
+    vim.keymap.set("n", mappings.reject, function()
+      M.reject_all()
+    end, vim.tbl_extend("force", opts, { desc = "chatforge reject AI change" }))
+  end
+  if mappings.diff then
+    vim.keymap.set("n", mappings.diff, function()
+      M.diff_with_current(first_staged_idx() or 1)
+    end, vim.tbl_extend("force", opts, { desc = "chatforge diff AI change" }))
+  end
+  if mappings.next then
+    vim.keymap.set("n", mappings.next, function()
+      jump_staged("next")
+    end, vim.tbl_extend("force", opts, { desc = "chatforge next AI change" }))
+  end
+  if mappings.prev then
+    vim.keymap.set("n", mappings.prev, function()
+      jump_staged("prev")
+    end, vim.tbl_extend("force", opts, { desc = "chatforge previous AI change" }))
   end
 end
 
@@ -198,6 +278,9 @@ local function write_lines_live(bufnr, lines, target, opts, on_done)
           vim.api.nvim_buf_set_lines(bufnr, #current - 1, #current, false, {})
         end
       end
+      if opts.highlight then
+        add_proposed_highlight(bufnr, start_idx, #lines, changed_line_marks(original, lines))
+      end
       vim.bo[bufnr].modifiable = was_modifiable
       state.applying = false
       render.remove_last_status()
@@ -215,6 +298,115 @@ local function write_lines_live(bufnr, lines, target, opts, on_done)
   end
 
   step()
+end
+
+local function insert_stream_line(stream, line)
+  vim.bo[stream.bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(stream.bufnr, stream.insert_at, stream.insert_at, false, { line })
+  table.insert(stream.lines, line)
+  stream.insert_at = stream.insert_at + 1
+  if state.source_winnr and vim.api.nvim_win_is_valid(state.source_winnr) then
+    vim.api.nvim_win_set_cursor(state.source_winnr, { math.max(stream.insert_at, 1), 0 })
+  end
+  add_proposed_highlight(stream.bufnr, stream.start_idx, #stream.lines)
+end
+
+function M.start_stream_preview(idx, block)
+  if state.streaming_change or state.staged_changes[idx] then
+    return false
+  end
+
+  local bufnr = block.target_bufnr
+  if block.target_file then
+    bufnr = use_source_buffer_for_path(block.target_file)
+    if not bufnr then
+      return false
+    end
+    block.target_bufnr = bufnr
+    state.source_bufnr = bufnr
+  end
+
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return false
+  end
+
+  local target = block.target
+  local was_modifiable = vim.bo[bufnr].modifiable
+  vim.bo[bufnr].modifiable = true
+  focus_source_window(bufnr)
+
+  local start_idx = target and target.line1 and (target.line1 - 1) or 0
+  local end_idx = target and target.line2 or -1
+  local original = vim.api.nvim_buf_get_lines(bufnr, start_idx, end_idx, false)
+  vim.api.nvim_buf_set_lines(bufnr, start_idx, end_idx, false, {})
+
+  state.streaming_change = {
+    idx = idx,
+    bufnr = bufnr,
+    block = block,
+    start_idx = start_idx,
+    end_idx = end_idx,
+    insert_at = start_idx,
+    original = original,
+    target = target,
+    was_modifiable = was_modifiable,
+    pending = "",
+    lines = {},
+  }
+  state.applying = true
+  setup_review_keymaps(bufnr)
+  return true
+end
+
+function M.append_stream_preview(text)
+  local stream = state.streaming_change
+  if not stream or not text or text == "" or not vim.api.nvim_buf_is_valid(stream.bufnr) then
+    return
+  end
+
+  stream.pending = stream.pending .. text
+  while true do
+    local newline = stream.pending:find("\n", 1, true)
+    if not newline then
+      break
+    end
+    local line = stream.pending:sub(1, newline - 1)
+    stream.pending = stream.pending:sub(newline + 1)
+    insert_stream_line(stream, line)
+  end
+end
+
+function M.finish_stream_preview()
+  local stream = state.streaming_change
+  if not stream then
+    return nil
+  end
+
+  if stream.pending ~= "" then
+    insert_stream_line(stream, stream.pending)
+  end
+
+  if not stream.target then
+    local current = vim.api.nvim_buf_get_lines(stream.bufnr, 0, -1, false)
+    if #current > #stream.lines and current[#current] == "" then
+      vim.api.nvim_buf_set_lines(stream.bufnr, #current - 1, #current, false, {})
+    end
+  end
+
+  vim.bo[stream.bufnr].modifiable = stream.was_modifiable
+  local change = {
+    bufnr = stream.bufnr,
+    start_idx = stream.start_idx,
+    end_idx = stream.end_idx,
+    new_line_count = #stream.lines,
+    original = stream.original,
+    target = stream.target,
+  }
+  add_proposed_highlight(stream.bufnr, stream.start_idx, #stream.lines, changed_line_marks(stream.original, stream.lines))
+  state.staged_changes[stream.idx] = change
+  state.streaming_change = nil
+  state.applying = false
+  return change
 end
 
 -- ── public API ─────────────────────────────────────────────────────────────
@@ -293,7 +485,8 @@ function M.stage_preview(idx)
   local target = block_target(idx, bufnr)
   write_lines_live(bufnr, lines, target, { highlight = true }, function(change)
     state.staged_changes[idx] = change
-    render.append_status("Implementation #" .. idx .. " staged. Apply accepts; Reject restores.")
+    setup_review_keymaps(bufnr)
+    render.append_status("Implementation #" .. idx .. " staged. Press ca to accept, co to reject, cd to diff.")
     log.log("stage_preview: block=%d bufnr=%d", idx, bufnr)
   end)
 end

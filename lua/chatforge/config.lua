@@ -14,6 +14,20 @@ M.defaults = {
   temperature   = 0.2,
   max_output_tokens = 2048,
   context_tokens = 64000,
+  highlights = {
+    diff = {
+      incoming = "ChatforgeProposedChange",
+    },
+  },
+  mappings = {
+    diff = {
+      accept = "ca",
+      reject = "co",
+      diff = "cd",
+      next = "]x",
+      prev = "[x",
+    },
+  },
   debug         = false,
   system_prompt = "You are a helpful coding assistant embedded in Neovim. "
                .. "Be concise. Use fenced code blocks with language tags for all code. "

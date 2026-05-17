@@ -10,7 +10,8 @@ local backend_control = require("chatforge.api.backend_control")
 ---@param messages  {role:string, content:string}[]
 ---@param on_done   fun(text:string|nil, err:string|nil)
 ---@param request_id number|nil
-function M.complete(src_bufnr, messages, on_done, request_id)
+---@param opts table|nil
+function M.complete(src_bufnr, messages, on_done, request_id, opts)
   if state.loading then
     on_done(nil, "A request is already in progress.")
     return
@@ -46,7 +47,7 @@ function M.complete(src_bufnr, messages, on_done, request_id)
       backend_control.offer_model_pull(model, err)
     end
     on_done(text, err)
-  end)
+  end, opts)
 end
 
 return M

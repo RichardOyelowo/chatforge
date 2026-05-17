@@ -256,7 +256,7 @@ function M.append_segments(segments)
         end
         table.insert(text_parts, string.format("Implementation #%d ready%s.", block_index, suffix))
         if not staged_hint_rendered then
-          table.insert(text_parts, string.format("Apply: :ChatApply %d. Reject: :ChatReject. Diff: :ChatDiff %d.", block_index, block_index))
+          table.insert(text_parts, string.format("Review: ca accept, co reject, cd diff. Commands: :ChatApply %d, :ChatReject, :ChatDiff %d.", block_index, block_index))
           staged_hint_rendered = true
           has_actions = true
         end

@@ -22,6 +22,7 @@ M.applying      = false
 M.edit_target   = nil  ---@type {bufnr:number,line1:number,line2:number,kind:string}|nil
 M.pending_blocks = {}  ---@type {lang:string,content:string,applied:boolean,target:table|nil}[]
 M.staged_changes = {}  ---@type table<number, table>
+M.streaming_change = nil
 M.ollama_job = nil
 M.ollama_pull_job = nil
 M.ollama_job_stopping = false
