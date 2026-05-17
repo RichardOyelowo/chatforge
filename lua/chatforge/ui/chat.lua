@@ -19,6 +19,18 @@ local function create_chat_buf()
   return b
 end
 
+local function create_input_buf()
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_name(b, "chatforge://input")
+  vim.bo[b].filetype   = "markdown"
+  vim.bo[b].buftype    = "nofile"
+  vim.bo[b].bufhidden  = "hide"
+  vim.bo[b].swapfile   = false
+  vim.bo[b].modifiable = true
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, { "" })
+  return b
+end
+
 local completion_cache_cwd = nil
 local completion_cache_items = nil
 
@@ -36,6 +48,52 @@ local function open_chat_window(chat_bufnr)
   return chat_w
 end
 
+local function input_geometry()
+  if not state.chat_winnr or not vim.api.nvim_win_is_valid(state.chat_winnr) then
+    return nil
+  end
+  local width = math.max(vim.api.nvim_win_get_width(state.chat_winnr) - 4, 24)
+  local height = 4
+  local row = math.max(vim.api.nvim_win_get_height(state.chat_winnr) - height - 3, 1)
+  return {
+    relative = "win",
+    win = state.chat_winnr,
+    row = row,
+    col = 1,
+    width = width,
+    height = height,
+    style = "minimal",
+    border = "rounded",
+    title = " message ",
+    title_pos = "left",
+    focusable = true,
+    zindex = 40,
+  }
+end
+
+local function sync_input_window()
+  local config = input_geometry()
+  if not config then
+    return
+  end
+
+  if not state.input_bufnr or not vim.api.nvim_buf_is_valid(state.input_bufnr) then
+    state.input_bufnr = create_input_buf()
+  end
+
+  if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+    vim.api.nvim_win_set_config(state.input_winnr, config)
+  else
+    state.input_winnr = vim.api.nvim_open_win(state.input_bufnr, false, config)
+  end
+
+  vim.wo[state.input_winnr].wrap = true
+  vim.wo[state.input_winnr].linebreak = true
+  vim.wo[state.input_winnr].number = false
+  vim.wo[state.input_winnr].relativenumber = false
+  vim.wo[state.input_winnr].signcolumn = "no"
+end
+
 -- ── right-side input area ─────────────────────────────────────────────────
 
 local function trim_lines(lines)
@@ -49,27 +107,17 @@ local function trim_lines(lines)
 end
 
 local function clear_input()
-  local b = state.chat_bufnr
+  local b = state.input_bufnr
   if not b or not vim.api.nvim_buf_is_valid(b) then return end
   state.input_lines = { "" }
-  render.redraw_input(state.input_lines)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, { "" })
   if state.input_is_open() then
-    vim.api.nvim_win_set_cursor(state.chat_winnr, { state.input_start_line, 3 })
+    vim.api.nvim_win_set_cursor(state.input_winnr, { 1, 0 })
   end
 end
 
 local function input_cursor_ok()
-  if not state.input_is_open() then
-    return false
-  end
-  local cursor = vim.api.nvim_win_get_cursor(state.chat_winnr)
-  return cursor[1] >= state.input_start_line and cursor[1] <= state.input_end_line
-end
-
-local function set_chat_modifiable(enabled)
-  if state.chat_bufnr and vim.api.nvim_buf_is_valid(state.chat_bufnr) then
-    vim.bo[state.chat_bufnr].modifiable = true
-  end
+  return state.input_is_open() and vim.api.nvim_get_current_buf() == state.input_bufnr
 end
 
 local function completion_items()
@@ -130,12 +178,12 @@ local function trigger_at_completion()
     if not input_cursor_ok() then
       return
     end
-    local line = vim.api.nvim_get_current_line():gsub("^│%s?", ""):gsub("%s*│$", "")
+    local line = vim.api.nvim_get_current_line()
     local actual_col = vim.fn.col(".") - 1
-    local col = math.max(actual_col - 2, 0)
+    local col = math.max(actual_col, 0)
     local prefix = completion_prefix(line, col)
     if not prefix then return end
-    local start_col = col - #prefix + 3
+    local start_col = col - #prefix + 1
     local filtered = {}
     local lower_prefix = prefix:lower()
     for _, item in ipairs(completion_items()) do
@@ -159,8 +207,8 @@ local function setup_input_autocmds(bufnr)
       if not input_cursor_ok() then
         return
       end
-      local line = vim.api.nvim_get_current_line():gsub("^│%s?", ""):gsub("%s*│$", "")
-      local col = math.max(vim.fn.col(".") - 3, 0)
+      local line = vim.api.nvim_get_current_line()
+      local col = math.max(vim.fn.col(".") - 1, 0)
       if completion_prefix(line, col) then
         trigger_at_completion()
       end
@@ -169,9 +217,12 @@ local function setup_input_autocmds(bufnr)
 end
 
 local function focus_input()
+  sync_input_window()
   if state.input_is_open() then
-    vim.api.nvim_set_current_win(state.chat_winnr)
-    vim.api.nvim_win_set_cursor(state.chat_winnr, { state.input_start_line, 3 })
+    vim.api.nvim_set_current_win(state.input_winnr)
+    local line_count = vim.api.nvim_buf_line_count(state.input_bufnr)
+    local last_line = vim.api.nvim_buf_get_lines(state.input_bufnr, line_count - 1, line_count, false)[1] or ""
+    vim.api.nvim_win_set_cursor(state.input_winnr, { line_count, #last_line })
     vim.cmd("startinsert")
   end
 end
@@ -236,18 +287,14 @@ local function render_history(src_bufnr)
 end
 
 local function read_input_lines()
-  local b = state.chat_bufnr
-  if not b or not vim.api.nvim_buf_is_valid(b) or not state.input_start_line then
+  local b = state.input_bufnr
+  if not b or not vim.api.nvim_buf_is_valid(b) then
     return { "" }
   end
 
-  local start_idx = state.input_start_line - 1
-  local end_idx = state.input_end_line
-  local raw = vim.api.nvim_buf_get_lines(b, start_idx, end_idx, false)
+  local raw = vim.api.nvim_buf_get_lines(b, 0, -1, false)
   local lines = {}
   for _, line in ipairs(raw) do
-    line = line:gsub("^│%s?", "")
-    line = line:gsub("%s*│$", "")
     line = line:gsub("%s+$", "")
     table.insert(lines, line)
   end
@@ -257,7 +304,6 @@ end
 
 local function sync_input_before_send()
   read_input_lines()
-  render.redraw_input(state.input_lines)
 end
  
 -- ── send flow ──────────────────────────────────────────────────────────────
@@ -359,7 +405,7 @@ local function send_from_input()
     return
   end
 
-  local b = state.chat_bufnr
+  local b = state.input_bufnr
   if not b or not vim.api.nvim_buf_is_valid(b) then return end
 
   sync_input_before_send()
@@ -404,21 +450,7 @@ local function setup_input_keymaps(bufnr)
       focus_input()
       return
     end
-    local cursor = vim.api.nvim_win_get_cursor(0)
-    if cursor[1] >= state.input_end_line then
-      return
-    end
-    set_chat_modifiable(true)
-    vim.api.nvim_put({ "│ " }, "l", true, true)
-  end, opts)
-  vim.keymap.set("i", "<BS>", function()
-    if not input_cursor_ok() then
-      focus_input()
-      return
-    end
-    set_chat_modifiable(true)
-    local keys = vim.api.nvim_replace_termcodes("<BS>", true, false, true)
-    vim.api.nvim_feedkeys(keys, "n", false)
+    vim.api.nvim_put({ "" }, "l", true, true)
   end, opts)
 end
 
@@ -433,7 +465,7 @@ function M.send_message(src_bufnr, input)
   if input then
     do_send(src_bufnr, input)
   else
-    if vim.api.nvim_get_current_buf() == state.chat_bufnr then
+    if vim.api.nvim_get_current_buf() == state.input_bufnr then
       send_from_input()
     else
       state.source_bufnr = src_bufnr
@@ -488,20 +520,42 @@ function M.open(src_bufnr)
   state.chat_bufnr = bufnr
   state.chat_winnr = winnr
   state.chat_source_bufnr = state.source_bufnr
-  setup_input_autocmds(bufnr)
-  setup_input_keymaps(bufnr)
+  state.input_bufnr = create_input_buf()
+  setup_input_autocmds(state.input_bufnr)
+  setup_input_keymaps(state.input_bufnr)
   render.write_header()
+  sync_input_window()
   log.log("chat open buf=%d win=%d src=%d", bufnr, winnr, src_bufnr)
+  local resize_group = vim.api.nvim_create_augroup("chatforge_chat_resize_" .. bufnr, { clear = true })
+  vim.api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
+    group = resize_group,
+    callback = function()
+      if not state.chat_is_open() then
+        return
+      end
+      render.redraw()
+      sync_input_window()
+    end,
+  })
   vim.api.nvim_create_autocmd("WinClosed", {
     pattern  = tostring(winnr),
     once     = true,
     callback = function()
+      if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+        pcall(vim.api.nvim_win_close, state.input_winnr, true)
+      end
       state.chat_winnr = nil
       state.chat_bufnr = nil
+      state.input_winnr = nil
       state.chat_source_bufnr = nil
       if vim.api.nvim_buf_is_valid(bufnr) then
         pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
       end
+      if state.input_bufnr and vim.api.nvim_buf_is_valid(state.input_bufnr) then
+        pcall(vim.api.nvim_buf_delete, state.input_bufnr, { force = true })
+      end
+      state.input_bufnr = nil
+      pcall(vim.api.nvim_del_augroup_by_id, resize_group)
       if vim.api.nvim_win_is_valid(origin_win) then
         vim.api.nvim_set_current_win(origin_win)
       end

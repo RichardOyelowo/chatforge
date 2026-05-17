@@ -3,11 +3,10 @@ local state = require("chatforge.core.state")
 local NL    = "\n"
 
 local CHAT_WIDTH = 58
-local INPUT_HEIGHT = 4
+local BOTTOM_PADDING = 7
 
 vim.api.nvim_set_hl(0, "ChatforgeUserBubble", { fg = "#d7f7ff", bg = "#17343a", default = true })
 vim.api.nvim_set_hl(0, "ChatforgeAssistantBubble", { fg = "#d8dee9", bg = "#171a22", default = true })
-vim.api.nvim_set_hl(0, "ChatforgeInputBox", { fg = "#89b4fa", bg = "#090d18", default = true })
 vim.api.nvim_set_hl(0, "ChatforgeMuted", { link = "Comment", default = true })
 vim.api.nvim_set_hl(0, "ChatforgeStatus", { link = "DiagnosticInfo", default = true })
 
@@ -91,21 +90,6 @@ local function set_lines(lines)
   vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
 end
 
-local function input_box_lines(input_lines)
-  local width = visible_width()
-  local label = " message "
-  local top = "╭" .. label .. string.rep("─", math.max(width - #label - 2, 0)) .. "╮"
-  local bottom = "╰" .. string.rep("─", width - 2) .. "╯"
-  local lines = { "", top }
-  for i = 1, INPUT_HEIGHT do
-    local content = input_lines[i] or ""
-    content = content:sub(1, width - 4)
-    table.insert(lines, "│ " .. content .. string.rep(" ", math.max(width - #content - 4, 0)) .. " │")
-  end
-  table.insert(lines, bottom)
-  return lines
-end
-
 local function apply_highlights()
   local b = chat_buf()
   if not b then return end
@@ -119,29 +103,25 @@ local function apply_highlights()
     vim.api.nvim_buf_add_highlight(b, state.render_ns, hl, span.line - 1, 0, -1)
   end
 
-  if state.input_start_line then
-    local start_idx = math.max(state.input_start_line - 4, 0)
-    local end_idx = math.min(vim.api.nvim_buf_line_count(b), start_idx + INPUT_HEIGHT + 4)
-    for lnum = start_idx, end_idx - 1 do
-      vim.api.nvim_buf_add_highlight(b, state.render_ns, "ChatforgeInputBox", lnum, 0, -1)
-    end
-  end
 end
 
-local function redraw(input_lines)
+local function redraw()
   local transcript = vim.deepcopy(state.chat_lines or {})
-  local box = input_box_lines(input_lines or state.input_lines or { "" })
-  local filler_count = math.max(visible_height() - #transcript - #box, 0)
-  state.input_start_line = #transcript + filler_count + 3
-  state.input_end_line = state.input_start_line + INPUT_HEIGHT - 1
+  local filler_count = math.max(visible_height() - #transcript - BOTTOM_PADDING, 0)
 
   local lines = {}
   vim.list_extend(lines, transcript)
   for _ = 1, filler_count do
     table.insert(lines, "")
   end
-  vim.list_extend(lines, box)
+  for _ = 1, BOTTOM_PADDING do
+    table.insert(lines, "")
+  end
   set_lines(lines)
+  local b = chat_buf()
+  if b then
+    vim.bo[b].modifiable = false
+  end
   apply_highlights()
 end
 
@@ -161,7 +141,7 @@ local function append_transcript(lines, kind)
   if state.chat_winnr
       and vim.api.nvim_win_is_valid(state.chat_winnr)
       and vim.api.nvim_win_get_buf(state.chat_winnr) == state.chat_bufnr then
-    local cursor_line = state.input_start_line
+    local cursor_line = math.max(vim.api.nvim_buf_line_count(state.chat_bufnr) - BOTTOM_PADDING, 1)
     vim.api.nvim_win_set_cursor(state.chat_winnr, { cursor_line, 3 })
   end
 end
@@ -218,12 +198,11 @@ function M.write_header()
     { line = 6, kind = "muted" },
   }
   state.input_lines = { "" }
-  redraw({ "" })
+  redraw()
 end
 
-function M.redraw_input(input_lines)
-  state.input_lines = input_lines
-  redraw(input_lines)
+function M.redraw()
+  redraw()
 end
 
 function M.append_user(content, model)

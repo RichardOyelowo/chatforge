@@ -5,11 +5,11 @@ M.buffers = {}
 
 M.chat_bufnr    = nil  ---@type number|nil
 M.chat_winnr    = nil  ---@type number|nil
+M.input_bufnr   = nil  ---@type number|nil
+M.input_winnr   = nil  ---@type number|nil
 M.source_bufnr  = nil  ---@type number|nil
 M.source_winnr  = nil  ---@type number|nil
 M.chat_source_bufnr = nil  ---@type number|nil
-M.input_start_line = nil  ---@type number|nil
-M.input_end_line = nil  ---@type number|nil
 M.input_lines = { "" }
 M.chat_lines = {}
 M.chat_spans = {}
@@ -62,11 +62,16 @@ function M.chat_is_open()
 end
 
 function M.input_is_open()
-  return M.chat_is_open() and M.input_start_line ~= nil
+  return M.chat_is_open()
+    and M.input_bufnr ~= nil
+    and vim.api.nvim_buf_is_valid(M.input_bufnr)
+    and M.input_winnr ~= nil
+    and vim.api.nvim_win_is_valid(M.input_winnr)
+    and vim.api.nvim_win_get_buf(M.input_winnr) == M.input_bufnr
 end
 
 function M.is_plugin_buf(bufnr)
-  return bufnr == M.chat_bufnr
+  return bufnr == M.chat_bufnr or bufnr == M.input_bufnr
 end
 
 return M
