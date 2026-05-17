@@ -13,7 +13,8 @@ M.chat_source_bufnr = nil  ---@type number|nil
 M.input_lines = { "" }
 M.chat_lines = {}
 M.chat_spans = {}
-M.last_status_lines = nil
+M.chat_entries = {}
+M.last_status_entry = nil
 M.render_ns = vim.api.nvim_create_namespace("chatforge_chat_render")
 M.loading       = false
 M.request_id    = 0
@@ -51,6 +52,7 @@ function M.clear(bufnr)
   M.pending_blocks = {}
   M.staged_changes = {}
   M.edit_target = nil
+  M.last_status_entry = nil
 end
 
 function M.chat_is_open()

@@ -3,7 +3,7 @@ local state = require("chatforge.core.state")
 local NL    = "\n"
 
 local CHAT_WIDTH = 58
-local BOTTOM_PADDING = 7
+local message_lines
 
 vim.api.nvim_set_hl(0, "ChatforgeUserBubble", { fg = "#d7f7ff", bg = "#17343a", default = true })
 vim.api.nvim_set_hl(0, "ChatforgeAssistantBubble", { fg = "#d8dee9", bg = "#171a22", default = true })
@@ -105,18 +105,41 @@ local function apply_highlights()
 
 end
 
-local function redraw()
-  local transcript = vim.deepcopy(state.chat_lines or {})
-  local filler_count = math.max(visible_height() - #transcript - BOTTOM_PADDING, 0)
-
+local function render_entries()
   local lines = {}
-  vim.list_extend(lines, transcript)
+  local spans = {}
+
+  for _, entry in ipairs(state.chat_entries or {}) do
+    local entry_lines
+    if entry.type == "raw" then
+      entry_lines = vim.deepcopy(entry.lines or {})
+    else
+      entry_lines = message_lines(entry.content, {
+        label = entry.label,
+        align = entry.align,
+      })
+    end
+
+    local start = #lines + 1
+    vim.list_extend(lines, entry_lines)
+    local finish = #lines
+    for line = start, finish do
+      table.insert(spans, { line = line, kind = entry.kind })
+    end
+  end
+
+  local filler_count = math.max(visible_height() - #lines - 1, 0)
   for _ = 1, filler_count do
     table.insert(lines, "")
   end
-  for _ = 1, BOTTOM_PADDING do
-    table.insert(lines, "")
-  end
+
+  state.chat_lines = lines
+  state.chat_spans = spans
+  return lines
+end
+
+local function redraw()
+  local lines = render_entries()
   set_lines(lines)
   local b = chat_buf()
   if b then
@@ -125,28 +148,20 @@ local function redraw()
   apply_highlights()
 end
 
-local function append_transcript(lines, kind)
-  state.chat_lines = state.chat_lines or {}
-  state.chat_spans = state.chat_spans or {}
-  local start = #state.chat_lines + 1
-  for _, line in ipairs(lines) do
-    table.insert(state.chat_lines, line)
-  end
-  local finish = #state.chat_lines
-  for line = start, finish do
-    table.insert(state.chat_spans, { line = line, kind = kind })
-  end
+local function append_entry(entry)
+  state.chat_entries = state.chat_entries or {}
+  table.insert(state.chat_entries, entry)
   redraw()
 
   if state.chat_winnr
       and vim.api.nvim_win_is_valid(state.chat_winnr)
       and vim.api.nvim_win_get_buf(state.chat_winnr) == state.chat_bufnr then
-    local cursor_line = math.max(vim.api.nvim_buf_line_count(state.chat_bufnr) - BOTTOM_PADDING, 1)
+    local cursor_line = math.max(vim.api.nvim_buf_line_count(state.chat_bufnr), 1)
     vim.api.nvim_win_set_cursor(state.chat_winnr, { cursor_line, 3 })
   end
 end
 
-local function message_lines(content, opts)
+message_lines = function(content, opts)
   opts = opts or {}
   local full_width = visible_width()
   local max_width = math.max(math.floor(full_width * 0.78), 28)
@@ -183,19 +198,19 @@ local function message_lines(content, opts)
 end
 
 function M.write_header()
-  state.chat_lines = {
-    "# chatforge",
-    "",
-    "Ask in the message box below. Generated code is kept out of this pane.",
-    "Apply writes into the source file; Reject discards the pending implementation.",
-    "",
-    "---",
-  }
-  state.chat_spans = {
-    { line = 1, kind = "muted" },
-    { line = 3, kind = "muted" },
-    { line = 4, kind = "muted" },
-    { line = 6, kind = "muted" },
+  state.chat_entries = {
+    {
+      type = "raw",
+      kind = "muted",
+      lines = {
+        "# chatforge",
+        "",
+        "Ask below. Code stays out of chat.",
+        "Apply writes. Reject discards.",
+        "",
+        "---",
+      },
+    },
   }
   state.input_lines = { "" }
   redraw()
@@ -207,7 +222,13 @@ end
 
 function M.append_user(content, model)
   local label = string.format("You [%s]", model or "?")
-  append_transcript(message_lines(content, { label = label, align = "right" }), "user")
+  append_entry({
+    type = "message",
+    kind = "user",
+    label = label,
+    align = "right",
+    content = content,
+  })
 end
 
 function M.append_segments(segments)
@@ -247,42 +268,44 @@ function M.append_segments(segments)
     table.insert(text_parts, "Generated code is staged in the source buffer and highlighted until Apply or Reject.")
   end
 
-  append_transcript(message_lines(table.concat(text_parts, "\n\n"), { label = "Assistant", align = "left" }), "assistant")
+  append_entry({
+    type = "message",
+    kind = "assistant",
+    label = "Assistant",
+    align = "left",
+    content = table.concat(text_parts, "\n\n"),
+  })
 end
 
 function M.append_assistant_text(content)
-  append_transcript(message_lines(content, { label = "Assistant", align = "left" }), "assistant")
+  append_entry({
+    type = "message",
+    kind = "assistant",
+    label = "Assistant",
+    align = "left",
+    content = content,
+  })
 end
 
 function M.append_status(msg, kind)
   local label = kind == "error" and "Error" or "Status"
-  local lines = message_lines(msg, { label = label, align = "left" })
-  local start_idx = #(state.chat_lines or {}) + 1
-  append_transcript(lines, "status")
-  state.last_status_span = { start = start_idx, finish = start_idx + #lines - 1 }
+  append_entry({
+    type = "message",
+    kind = "status",
+    label = label,
+    align = "left",
+    content = msg,
+  })
+  state.last_status_entry = #(state.chat_entries or {})
 end
 
 function M.remove_last_status()
-  local span = state.last_status_span
-  if not span then
+  local entry = state.last_status_entry
+  if not entry or not state.chat_entries or not state.chat_entries[entry] then
     return
   end
-  for _ = span.start, span.finish do
-    table.remove(state.chat_lines, span.start)
-  end
-  state.last_status_span = nil
-
-  local spans = {}
-  for _, existing in ipairs(state.chat_spans or {}) do
-    if existing.line < span.start or existing.line > span.finish then
-      local line = existing.line
-      if line > span.finish then
-        line = line - (span.finish - span.start + 1)
-      end
-      table.insert(spans, { line = line, kind = existing.kind })
-    end
-  end
-  state.chat_spans = spans
+  table.remove(state.chat_entries, entry)
+  state.last_status_entry = nil
   redraw()
 end
 

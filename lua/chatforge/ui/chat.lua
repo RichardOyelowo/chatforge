@@ -34,64 +34,39 @@ end
 local completion_cache_cwd = nil
 local completion_cache_items = nil
 
-local function open_chat_window(chat_bufnr)
-  vim.cmd("botright vsplit")
-  local chat_w = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(chat_w, chat_bufnr)
+local function configure_chat_window(chat_w)
   vim.wo[chat_w].wrap       = true
   vim.wo[chat_w].linebreak  = true
   vim.wo[chat_w].number     = false
   vim.wo[chat_w].relativenumber = false
   vim.wo[chat_w].signcolumn = "no"
   vim.wo[chat_w].winbar     = " chatforge "
+end
+
+local function configure_input_window(input_w)
+  vim.wo[input_w].wrap       = true
+  vim.wo[input_w].linebreak  = true
+  vim.wo[input_w].number     = false
+  vim.wo[input_w].relativenumber = false
+  vim.wo[input_w].signcolumn = "no"
+  vim.wo[input_w].winbar     = " message "
+end
+
+local function open_chat_windows(chat_bufnr, input_bufnr)
+  vim.cmd("botright vsplit")
+  local chat_w = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(chat_w, chat_bufnr)
   vim.cmd("vertical resize 65")
-  return chat_w
-end
+  configure_chat_window(chat_w)
 
-local function input_geometry()
-  if not state.chat_winnr or not vim.api.nvim_win_is_valid(state.chat_winnr) then
-    return nil
-  end
-  local width = math.max(vim.api.nvim_win_get_width(state.chat_winnr) - 4, 24)
-  local height = 4
-  local row = math.max(vim.api.nvim_win_get_height(state.chat_winnr) - height - 3, 1)
-  return {
-    relative = "win",
-    win = state.chat_winnr,
-    row = row,
-    col = 1,
-    width = width,
-    height = height,
-    style = "minimal",
-    border = "rounded",
-    title = " message ",
-    title_pos = "left",
-    focusable = true,
-    zindex = 40,
-  }
-end
+  vim.cmd("belowright split")
+  local input_w = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(input_w, input_bufnr)
+  vim.cmd("resize 6")
+  configure_input_window(input_w)
 
-local function sync_input_window()
-  local config = input_geometry()
-  if not config then
-    return
-  end
-
-  if not state.input_bufnr or not vim.api.nvim_buf_is_valid(state.input_bufnr) then
-    state.input_bufnr = create_input_buf()
-  end
-
-  if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
-    vim.api.nvim_win_set_config(state.input_winnr, config)
-  else
-    state.input_winnr = vim.api.nvim_open_win(state.input_bufnr, false, config)
-  end
-
-  vim.wo[state.input_winnr].wrap = true
-  vim.wo[state.input_winnr].linebreak = true
-  vim.wo[state.input_winnr].number = false
-  vim.wo[state.input_winnr].relativenumber = false
-  vim.wo[state.input_winnr].signcolumn = "no"
+  vim.api.nvim_set_current_win(chat_w)
+  return chat_w, input_w
 end
 
 -- ── right-side input area ─────────────────────────────────────────────────
@@ -217,7 +192,6 @@ local function setup_input_autocmds(bufnr)
 end
 
 local function focus_input()
-  sync_input_window()
   if state.input_is_open() then
     vim.api.nvim_set_current_win(state.input_winnr)
     local line_count = vim.api.nvim_buf_line_count(state.input_bufnr)
@@ -225,6 +199,18 @@ local function focus_input()
     vim.api.nvim_win_set_cursor(state.input_winnr, { line_count, #last_line })
     vim.cmd("startinsert")
   end
+end
+
+local function setup_chat_keymaps(bufnr)
+  local opts = { noremap = true, silent = true, buffer = bufnr }
+  local redirect = function()
+    focus_input()
+  end
+  for _, lhs in ipairs({ "i", "a", "I", "A", "o", "O", "s", "S", "c", "C" }) do
+    vim.keymap.set("n", lhs, redirect, opts)
+  end
+  vim.keymap.set("n", "<CR>", redirect, opts)
+  vim.keymap.set("n", "gi", redirect, opts)
 end
 
 local function has_staged_changes()
@@ -516,15 +502,17 @@ function M.open(src_bufnr)
   end
   local origin_win = vim.api.nvim_get_current_win()
   local bufnr      = create_chat_buf()
-  local winnr = open_chat_window(bufnr)
+  local input_bufnr = create_input_buf()
+  local winnr, input_winnr = open_chat_windows(bufnr, input_bufnr)
   state.chat_bufnr = bufnr
   state.chat_winnr = winnr
   state.chat_source_bufnr = state.source_bufnr
-  state.input_bufnr = create_input_buf()
+  state.input_bufnr = input_bufnr
+  state.input_winnr = input_winnr
   setup_input_autocmds(state.input_bufnr)
   setup_input_keymaps(state.input_bufnr)
+  setup_chat_keymaps(bufnr)
   render.write_header()
-  sync_input_window()
   log.log("chat open buf=%d win=%d src=%d", bufnr, winnr, src_bufnr)
   local resize_group = vim.api.nvim_create_augroup("chatforge_chat_resize_" .. bufnr, { clear = true })
   vim.api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
@@ -534,7 +522,6 @@ function M.open(src_bufnr)
         return
       end
       render.redraw()
-      sync_input_window()
     end,
   })
   vim.api.nvim_create_autocmd("WinClosed", {
@@ -558,6 +545,15 @@ function M.open(src_bufnr)
       pcall(vim.api.nvim_del_augroup_by_id, resize_group)
       if vim.api.nvim_win_is_valid(origin_win) then
         vim.api.nvim_set_current_win(origin_win)
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(input_winnr),
+    once = true,
+    callback = function()
+      if state.chat_winnr and vim.api.nvim_win_is_valid(state.chat_winnr) then
+        pcall(vim.api.nvim_win_close, state.chat_winnr, true)
       end
     end,
   })
