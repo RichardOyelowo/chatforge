@@ -12,6 +12,8 @@ M.defaults = {
   ollama_url    = "http://localhost:11434",
   max_tokens    = 4096,
   temperature   = 0.2,
+  max_output_tokens = 2048,
+  context_tokens = 64000,
   debug         = false,
   system_prompt = "You are a helpful coding assistant embedded in Neovim. "
                .. "Be concise. Use fenced code blocks with language tags for all code. "

@@ -11,8 +11,8 @@ local log        = require("chatforge.utils.logger")
  
 local function create_chat_buf()
   local b = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_name(b, "AI Chat " .. b)
-  vim.bo[b].filetype   = "chatforge"
+  vim.api.nvim_buf_set_name(b, "chatforge://chat")
+  vim.bo[b].filetype   = "markdown"
   vim.bo[b].buftype    = "nofile"
   vim.bo[b].swapfile   = false
   vim.bo[b].modifiable = true
@@ -31,7 +31,7 @@ local function open_chat_window(chat_bufnr)
   vim.wo[chat_w].number     = false
   vim.wo[chat_w].relativenumber = false
   vim.wo[chat_w].signcolumn = "no"
-  vim.wo[chat_w].winbar     = " chatforge  |  Enter sends  |  Ctrl-j newline "
+  vim.wo[chat_w].winbar     = " chatforge "
   vim.cmd("vertical resize 65")
   return chat_w
 end
@@ -130,7 +130,7 @@ local function trigger_at_completion()
     if not input_cursor_ok() then
       return
     end
-    local line = vim.api.nvim_get_current_line():gsub("^>%s?", "")
+    local line = vim.api.nvim_get_current_line():gsub("^│%s?", ""):gsub("%s*│$", "")
     local actual_col = vim.fn.col(".") - 1
     local col = math.max(actual_col - 2, 0)
     local prefix = completion_prefix(line, col)
@@ -159,7 +159,7 @@ local function setup_input_autocmds(bufnr)
       if not input_cursor_ok() then
         return
       end
-      local line = vim.api.nvim_get_current_line():gsub("^>%s?", "")
+      local line = vim.api.nvim_get_current_line():gsub("^│%s?", ""):gsub("%s*│$", "")
       local col = math.max(vim.fn.col(".") - 3, 0)
       if completion_prefix(line, col) then
         trigger_at_completion()
@@ -246,7 +246,8 @@ local function read_input_lines()
   local raw = vim.api.nvim_buf_get_lines(b, start_idx, end_idx, false)
   local lines = {}
   for _, line in ipairs(raw) do
-    line = line:gsub("^>%s?", "")
+    line = line:gsub("^│%s?", "")
+    line = line:gsub("%s*│$", "")
     line = line:gsub("%s+$", "")
     table.insert(lines, line)
   end
@@ -408,7 +409,7 @@ local function setup_input_keymaps(bufnr)
       return
     end
     set_chat_modifiable(true)
-    vim.api.nvim_put({ "> " }, "l", true, true)
+    vim.api.nvim_put({ "│ " }, "l", true, true)
   end, opts)
   vim.keymap.set("i", "<BS>", function()
     if not input_cursor_ok() then

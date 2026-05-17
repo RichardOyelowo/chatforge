@@ -73,10 +73,61 @@ local function block_while_applying(action)
   return true
 end
 
-local function edit_path(path)
-  local ok, err = pcall(vim.cmd, "edit " .. vim.fn.fnameescape(path))
+local function find_window_for_buf(bufnr)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == bufnr then
+      return win
+    end
+  end
+  return nil
+end
+
+local function use_source_buffer_for_path(path)
+  local absolute = vim.fn.fnamemodify(path, ":p")
+  local bufnr = vim.fn.bufadd(absolute)
+  vim.fn.bufload(bufnr)
+
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    vim.notify("[chatforge] Could not open " .. path .. ".", vim.log.levels.ERROR)
+    return nil
+  end
+
+  local win = find_window_for_buf(bufnr)
+  if not win then
+    win = state.source_winnr
+    if not win or not vim.api.nvim_win_is_valid(win) then
+      win = vim.api.nvim_get_current_win()
+      if state.is_plugin_buf(vim.api.nvim_win_get_buf(win)) then
+        win = nil
+      end
+    end
+  end
+
+  if win and vim.api.nvim_win_is_valid(win) then
+    vim.api.nvim_set_current_win(win)
+    if vim.api.nvim_win_get_buf(win) ~= bufnr then
+      vim.api.nvim_win_set_buf(win, bufnr)
+    end
+    state.source_winnr = win
+  end
+
+  state.source_bufnr = bufnr
+  return bufnr
+end
+
+local function write_buffer_to_disk(bufnr)
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return false
+  end
+  if vim.bo[bufnr].buftype ~= "" or vim.api.nvim_buf_get_name(bufnr) == "" then
+    return true
+  end
+
+  local ok, err = pcall(vim.api.nvim_buf_call, bufnr, function()
+    vim.cmd("silent write")
+  end)
   if not ok then
-    vim.notify("[chatforge] Could not open " .. path .. ": " .. tostring(err), vim.log.levels.ERROR)
+    vim.notify("[chatforge] Could not write accepted change: " .. tostring(err), vim.log.levels.ERROR)
     return false
   end
   return true
@@ -177,12 +228,16 @@ function M.apply_to_current(idx)
 
   local staged = state.staged_changes[idx]
   if staged then
+    if not write_buffer_to_disk(staged.bufnr) then
+      render.append_status("Could not write implementation #" .. idx .. ".")
+      return
+    end
     clear_proposed_highlight(staged)
     state.staged_changes[idx] = nil
     if state.pending_blocks[idx] then
       state.pending_blocks[idx].applied = true
     end
-    render.append_status("Accepted implementation #" .. idx .. ".")
+    render.append_status("Accepted implementation #" .. idx .. " and wrote the source buffer.")
     vim.notify("[chatforge] Accepted implementation #" .. idx, vim.log.levels.INFO)
     return
   end
@@ -222,16 +277,12 @@ function M.stage_preview(idx)
 
   local bufnr = target_bufnr_for_block(idx)
   if block.target_file then
-    if state.source_winnr and vim.api.nvim_win_is_valid(state.source_winnr) then
-      vim.api.nvim_set_current_win(state.source_winnr)
-    end
-    if not edit_path(block.target_file) then
+    bufnr = use_source_buffer_for_path(block.target_file)
+    if not bufnr then
       return
     end
-    bufnr = vim.api.nvim_get_current_buf()
     block.target_bufnr = bufnr
     state.source_bufnr = bufnr
-    state.source_winnr = vim.api.nvim_get_current_win()
   end
 
   if not bufnr then
@@ -261,20 +312,14 @@ function M.apply_to_file(idx, fpath)
     return
   end
 
-  if state.source_winnr and vim.api.nvim_win_is_valid(state.source_winnr) then
-    vim.api.nvim_set_current_win(state.source_winnr)
-  end
-
   -- Open (or create) the file in the source area and write it live.
-  if not edit_path(fpath) then
+  local bufnr = use_source_buffer_for_path(fpath)
+  if not bufnr then
     return
   end
-  local bufnr = vim.api.nvim_get_current_buf()
-  state.source_bufnr = bufnr
-  state.source_winnr = vim.api.nvim_get_current_win()
 
   write_lines_live(bufnr, lines, nil, { highlight = false }, function()
-    vim.cmd("write")
+    write_buffer_to_disk(bufnr)
     state.pending_blocks[idx].applied = true
     vim.notify("[chatforge] Written block #" .. idx .. " -> " .. fpath, vim.log.levels.INFO)
   end)

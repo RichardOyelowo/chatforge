@@ -1,8 +1,8 @@
 # <img src="images/chatforge_logo.svg">
 
-An AI dev assistant that lives inside Neovim. Persistent chat per buffer, Ollama backend, code actions, file and directory injection, per-buffer model switching. No keymaps forced on you.
+An AI dev assistant that lives inside Neovim. Persistent chat per buffer, Ollama backend, code actions, file and directory injection, per-buffer model switching. No global keymaps forced on you.
 
-Most AI plugins give you a one-shot prompt or a floating thing that vanishes. This one stays open, remembers your full conversation per buffer, understands what you're actually trying to do — fix a bug, explain something, look at this directory — and drops the action commands right under every code block so you never have to remember a thing.
+Most AI plugins give you a one-shot prompt or a floating thing that vanishes. This one stays open, remembers your full conversation per buffer, understands what you're actually trying to do: fix a bug, explain something, look at this directory. It drops the action commands right under every code block so you never have to remember a thing.
 
 ---
 
@@ -11,15 +11,15 @@ Most AI plugins give you a one-shot prompt or a floating thing that vanishes. Th
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Demo](#demo)
 - [How the Chat Works](#how-the-chat-works)
 - [Sending Messages](#sending-messages)
 - [Working With Files and Directories](#working-with-files-and-directories)
 - [How Chatforge Reads Your Intent](#how-chatforge-reads-your-intent)
 - [Code Blocks and Actions](#code-blocks-and-actions)
-- [Floating Code Preview](#floating-code-preview)
-- [Model Picker](#model-picker)
+- [Model Selection](#model-selection)
 - [Commands](#commands)
-- [Setting Up Keymaps](#setting-up-keymaps)
+- [Keymaps](#keymaps)
 - [Project Layout](#project-layout)
 - [Adding Another Backend](#adding-another-backend)
 - [Troubleshooting](#troubleshooting)
@@ -30,19 +30,16 @@ Most AI plugins give you a one-shot prompt or a floating thing that vanishes. Th
 ## Requirements
 
 - Neovim >= 0.10
-- [Ollama](https://ollama.com) running locally — default `localhost:11434`
+- [Ollama](https://ollama.com) running locally, default `localhost:11434`
 - `curl` in `$PATH`
 
 Optional but worth having:
-- [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) — chat buffer is `filetype=markdown` so it just picks it up automatically
-- [dressing.nvim](https://github.com/stevearc/dressing.nvim) — nicer vim.ui overall
+- [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim), chat buffer is `filetype=markdown` so it just picks it up automatically
+- [dressing.nvim](https://github.com/stevearc/dressing.nvim), nicer vim.ui overall
 
 ---
 
 ## Installation
-**If you want no automatic context at all** — just ask a plain question that doesn't start with `fix`, `explain`, or `refactor`. chatforge only injects context when the phrasing suggests you're working on the current file.
-
----
 
 ### lazy.nvim
 
@@ -51,9 +48,8 @@ Optional but worth having:
   "RichardOyelowo/chatforge.nvim",
 
   cmd = {
-    "Chat", "ChatSend", "ChatSetModel", "ChatReset",
-    "ChatActivate", "ChatApply", "ChatAccept",
-    "ChatDiff", "ChatYank", "ChatPreview", "ChatReject",
+    "Chat", "ChatSend", "ChatModel", "ChatReset",
+    "ChatApply", "ChatDiff", "ChatReject", "ChatBackend",
   },
 
   config = function()
@@ -86,17 +82,65 @@ require("chatforge").setup({
 })
 ```
 
-`debug = true` turns on `[chatforge]` notifications at every step — request sent, response received, blocks parsed. Use it when something isn't working and you want to trace where it breaks.
+`debug = true` turns on `[chatforge]` notifications at every step: request sent, response received, blocks parsed. Use it when something isn't working and you want to trace where it breaks.
+
+---
+
+## Demo
+
+**Overview**
+
+The chat panel lives on the right. The source buffer stays on the left.
+
+<video src="images/demo-overview.webm" controls muted loop></video>
+
+**Full chat workflow**
+
+Open chat, type in the right-side input, watch generated code write into the buffer, then accept it.
+
+<video src="images/demo-full-chat-workflow.webm" controls muted loop></video>
+
+**Staged apply, diff, and reject**
+
+Generated edits are staged into the source buffer first. Diff compares the original text with the proposed change. Apply accepts it. Reject restores the original lines.
+
+<video src="images/demo-staged-apply-diff-reject.webm" controls muted loop></video>
+
+**@file and @dir completion**
+
+Typing `@` in the message box opens file and directory suggestions.
+
+<video src="images/demo-context-completion.webm" controls muted loop></video>
+
+**Selected-range edits**
+
+Visual selection sends only the highlighted range. The replacement is staged back into that range.
+
+<video src="images/demo-selection-edit.webm" controls muted loop></video>
+
+**Safe examples**
+
+Plain chat and example code stay in the chat flow. They do not modify files.
+
+<video src="images/demo-safe-example.webm" controls muted loop></video>
+
+**Backend and model recovery**
+
+chatforge can prompt to start Ollama, pull a missing model, and manage backend helper jobs.
+
+<video src="images/demo-backend-model-recovery.webm" controls muted loop></video>
 
 ---
 
 ## How the Chat Works
 
-`:Chat` opens a vertical split on the right. The buffer is `filetype=markdown` and read-only — it's a display surface, not an input field. You send messages with `:ChatSend`, not by typing in the buffer.
+`:Chat` opens a styled chat panel on the right. The conversation stays text-only, and a bordered message box sits inside the panel near the bottom. `:ChatSend` with no arguments focuses that box. Run `:ChatSend` again while focused in the box to send its contents, or map that command to a key yourself.
 
-Conversation is stored per source buffer. Whichever buffer you had open when you ran `:Chat` owns that session. Open a chat from `init.lua` and another from `server.go` — they each get their own history and their own model selection. Nothing bleeds between them.
+See the [overview demo](images/demo-overview.webm) for the normal layout: source buffer on the left, chat panel on the right.
 
-**Code the model writes is highlighted green.** Code you send is shown with the default blockquote style. At the end of every response that contains code, chatforge shows you exactly which commands are available for that response — you never have to guess.
+Conversation is stored per source buffer. Whichever buffer you had open when you ran `:Chat` owns that session. Open a chat from `init.lua` and another from `server.go`, and they each get their own history and model selection. Nothing bleeds between them.
+
+Generated code stays out of the chat pane. If the response is meant to change a file, chatforge stages the code in the source buffer and highlights the proposed edit there. The chat pane shows the commands available for that response.
 
 ---
 
@@ -104,19 +148,23 @@ Conversation is stored per source buffer. Whichever buffer you had open when you
 
 There are three ways, pick whichever suits the moment:
 
-**Floating input** — `:ChatSend` with no arguments opens a small floating window in insert mode. `<Enter>` sends, `<Esc>` cancels. This is the main way to have a back-and-forth conversation.
+**Right-side input**, `:ChatSend` with no arguments focuses the message box in the chat panel. Type there, then press `<Enter>` or run `:ChatSend` again to send its contents. Typing `@` opens file and directory suggestions for `@file` and `@dir` context.
 
-**Inline** — `:ChatSend fix the null check in the auth handler` if you already know what you want to say and don't need the prompt.
+**Inline**, `:ChatSend fix the null check in the auth handler` if you already know what you want to say and don't need the prompt.
 
-**Visual selection** — highlight lines in visual mode then `:'<,'>ChatSend`. The selected code gets wrapped in a fenced block with the correct filetype and sent. Good for asking about a specific function without having to describe where it is or copy-paste anything.
+**Visual selection**, highlight lines in visual mode then `:'<,'>ChatSend`. The selected code gets wrapped in a fenced block with the correct filetype and sent. Good for asking about a specific function without having to describe where it is or copy-paste anything. See the [selected-range edit demo](images/demo-selection-edit.webm).
+
+Plain chat and example requests do not modify files. If the model returns example code outside an edit, fix, refactor, create file, or selected-range request, chatforge keeps it as an example in the chat pane. See the [safe examples demo](images/demo-safe-example.webm).
 
 ---
 
 ## Working With Files and Directories
 
-This is where chatforge gets a lot more useful than just a chat window. You can pull any file or directory listing directly into your message using `@file` and `@dir` — chatforge reads them off disk and injects their contents into the prompt before it goes to the model.
+This is where chatforge gets a lot more useful than just a chat window. You can pull any file or directory listing directly into your message using `@file` and `@dir`. chatforge reads them off disk and injects their contents into the prompt before it goes to the model.
 
-### @file — pull a file into the conversation
+The input box can complete `@file` and `@dir` paths for you. See the [context completion demo](images/demo-context-completion.webm).
+
+### @file: pull a file into the conversation
 
 The basic idea: anywhere you'd normally have to paste code or describe what's in a file, just reference it directly.
 
@@ -124,7 +172,7 @@ The basic idea: anywhere you'd normally have to paste code or describe what's in
 :ChatSend explain @file lua/chatforge/core/parser.lua
 ```
 
-chatforge reads `parser.lua`, wraps it in a fenced code block with the correct filetype, and injects it into the prompt. The model sees the actual file contents — not a description of it, the real code.
+chatforge reads `parser.lua`, wraps it in a fenced code block with the correct filetype, and injects it into the prompt. The model sees the actual file contents, not a description of it.
 
 ```
 :ChatSend there's a bug somewhere in @file src/auth/middleware.go can you find it
@@ -134,7 +182,7 @@ chatforge reads `parser.lua`, wraps it in a fenced code block with the correct f
 :ChatSend @file config/database.yml is there anything wrong with this config
 ```
 
-The `@file` can go anywhere in the message — start, middle, end, doesn't matter. And you can use multiple in one message:
+The `@file` can go anywhere in the message: start, middle, end, doesn't matter. And you can use multiple in one message:
 
 ```
 :ChatSend compare @file src/old_parser.lua and @file src/new_parser.lua
@@ -144,13 +192,13 @@ Both files get resolved before the message goes out. The model sees both.
 
 **Paths are relative to Neovim's cwd.** Run `:pwd` if you're not sure where that is. `@file ~/.config/nvim/init.lua` with an absolute path or `~` expansion works too.
 
-### @dir — give the model a view of a directory
+### @dir: give the model a view of a directory
 
 ```
 :ChatSend @dir lua/chatforge give me an overview of how this codebase is structured
 ```
 
-chatforge lists the directory one level deep — each entry marked `f` for file or `d` for directory. The model gets a clear picture of what's there without you having to paste a tree manually or describe the structure yourself.
+chatforge lists the directory one level deep. Each entry is marked `f` for file or `d` for directory. The model gets a clear picture of what's there without you having to paste a tree manually or describe the structure yourself.
 
 ```
 :ChatSend what's in @dir src/components and which ones look like they handle state
@@ -165,12 +213,12 @@ Like `@file`, `@dir` can go anywhere in the message and you can use multiple.
 ### Combining @file and @dir
 
 ```
-:ChatSend here's the project @dir lua/chatforge and here's the file I'm working on @file lua/chatforge/ui/chat.lua — what's the best place to add streaming support
+:ChatSend here's the project @dir lua/chatforge and here's the file I'm working on @file lua/chatforge/ui/chat.lua, what's the best place to add streaming support
 ```
 
 Both get resolved and injected. The model sees the directory structure and the specific file in one prompt.
 
-**Both are case-insensitive** — `@FILE`, `@File`, `@file` all work the same. If a path can't be read, chatforge drops an inline comment into the prompt explaining what failed so the model can acknowledge it rather than silently pretending the file doesn't exist.
+**Both are case-insensitive**. `@FILE`, `@File`, `@file` all work the same. If a path can't be read, chatforge drops an inline comment into the prompt explaining what failed so the model can acknowledge it rather than silently pretending the file doesn't exist.
 
 ---
 
@@ -179,12 +227,6 @@ Both get resolved and injected. The model sees the directory structure and the s
 Beyond `@file` and `@dir`, chatforge also reads the start of your message to figure out what you're trying to do and automatically adds the right context before sending.
 
 If you're in a file and you say `fix`, `explain`, or `refactor`, chatforge injects the entire current buffer into the prompt for you:
-
-```
-:ChatSend fix the edge case in the pattern match
-```
-
-If you're currently editing `lua/chatforge/core/parser.lua`, that message becomes:
 
 ```
 :ChatSend fix the edge case in the pattern match
@@ -228,61 +270,37 @@ This automatic injection happens for:
 
 ## Code Blocks and Actions
 
-Every response that has code ends with a command hint line:
+When a response is an implementation request, chatforge stages the generated code directly into the source buffer with a proposed-change highlight before you accept it. The chat pane stays text-only and shows command hints.
+
+See the [staged apply, diff, and reject demo](images/demo-staged-apply-diff-reject.webm).
 
 ```
-  :ChatPreview   :ChatApply   :ChatDiff   :ChatReject
+  :ChatApply 1    :ChatReject    :ChatDiff 1
 ```
 
-If there are multiple blocks:
+**`:ChatApply N`** accepts the staged implementation, clears the proposed-change highlight, and leaves the code in the source buffer. If the prompt came from a visual selection, only that selected range is staged and accepted.
 
-```
-  :ChatPreview 1   :ChatPreview 2   :ChatPreview 3
-  :ChatApply N   :ChatDiff N   :ChatReject
-```
+**`:ChatDiff N`** opens a tab with a side-by-side comparison. For a staged change, it compares the original lines against the proposed implementation. `:tabclose` when done.
 
-**`:ChatApply N`** / **`:ChatAccept N`** — replaces the current buffer with block N. chatforge won't let you accidentally apply to the chat buffer itself.
+**`:ChatReject`** restores the original source lines and removes the staged implementation.
 
-**`:ChatDiff N`** — opens a tab with a side-by-side diff between your current buffer and block N. `:tabclose` when done.
-
-**`:ChatYank N`** — yanks the block to the unnamed register. `p` it wherever you want.
-
-**`:ChatReject`** — discards all pending blocks from the last response.
-
-**`:ChatPreview N`** — opens the block in a floating window. See below.
-
-Block numbers are just the order they appeared in the response — first code block is 1, second is 2.
+Block numbers are just the order they appeared in the response. First code block is 1, second is 2. Apply only accepts a block that has been staged into the source buffer.
 
 ---
 
-## Floating Code Preview
+## Model Selection
 
-`:ChatPreview N` opens the code block in a centred floating window with full syntax highlighting. A `lua` block opens with `filetype=lua`, `python` with `filetype=python`, and so on — whatever the model tagged the fenced block with.
+`:ChatModel` prompts for a model name.
 
-A small action bar sits below it:
+`:ChatModel codestral` skips the prompt and sets it directly.
 
-```
-  a Apply   d Diff   y Yank   q Close   (block #1)
-```
+Model selection is per buffer. One buffer can use `codestral` while another uses `llama3`. State is stored per source buffer.
 
-- `a` — applies to current buffer, closes the float
-- `d` — opens diff tab, closes the float
-- `y` — yanks to register, float stays open
-- `q` or `<Esc>` — closes without doing anything
+If Ollama is not reachable, chatforge offers to start `ollama serve`, show the command, or ignore it. If the model is missing, chatforge offers to run `ollama pull <model>`, show the command, or ignore it.
 
-The float closes on its own if focus moves away.
+Use `:ChatBackend status` to inspect plugin-managed backend helpers. Use `:ChatBackend start` to start `ollama serve`. Use `:ChatBackend stop` to stop plugin-managed backend jobs.
 
----
-
-## Model Picker
-
-`:ChatSetModel` without a name opens a native floating picker that fetches your installed models from Ollama's API. Current model is marked ✓. Navigate with `j`/`k`, confirm with `<CR>`, cancel with `q` or `<Esc>`.
-
-`:ChatSetModel codestral` skips the picker and sets it directly.
-
-Model selection is per buffer. One buffer can use `codestral` while another uses `llama3` — state is stored per source buffer.
-
-If Ollama isn't reachable the picker falls back to just showing the configured default so you're not stuck.
+See the [backend and model recovery demo](images/demo-backend-model-recovery.webm).
 
 ---
 
@@ -291,31 +309,19 @@ If Ollama isn't reachable the picker falls back to just showing the configured d
 | Command | What it does |
 |---|---|
 | `:Chat` | Open or focus the chat window |
-| `:ChatSend [message]` | No args = floating prompt. With args = send directly |
-| `:ChatSetModel [name]` | No args = floating picker. With name = set directly |
+| `:ChatSend [message]` | No args = focus input pane. With args = send directly |
+| `:ChatModel [name]` | No args = prompt for a model. With name = set directly |
 | `:ChatReset` | Clear history, reopen chat |
-| `:ChatActivate` | Activate the action button under cursor |
-| `:ChatApply [N]` | Apply block N to current buffer. Default 1 |
-| `:ChatAccept [N]` | Same as `:ChatApply` |
+| `:ChatApply [N]` | Accept staged implementation N. Default 1 |
 | `:ChatDiff [N]` | Diff block N against current buffer |
-| `:ChatYank [N]` | Yank block N to register |
-| `:ChatPreview [N]` | Preview block N in floating window |
-| `:ChatReject` | Discard all pending blocks |
+| `:ChatReject` | Restore original lines and discard staged changes |
+| `:ChatBackend [status/start/stop]` | Inspect, start, or stop plugin-managed backend helpers |
 
 ---
 
-## Setting Up Keymaps
+## Keymaps
 
-No keymaps set by default. Here's a starting point:
-
-```lua
-vim.keymap.set("n", "<leader>ac", "<cmd>Chat<cr>",         { desc = "chatforge open" })
-vim.keymap.set("n", "<leader>as", "<cmd>ChatSend<cr>",     { desc = "chatforge send" })
-vim.keymap.set("n", "<leader>am", "<cmd>ChatSetModel<cr>", { desc = "chatforge model" })
-
--- visual selection → send as code block
-vim.keymap.set("v", "<leader>as", ":'<,'>ChatSend<cr>",    { desc = "chatforge send selection" })
-```
+chatforge does not set global user keymaps. The scratch message box has buffer-local input behavior: `<Enter>` sends and `<C-j>` inserts a newline. Add your own mappings in your Neovim config if you want shortcuts outside that input box.
 
 ---
 
@@ -323,30 +329,28 @@ vim.keymap.set("v", "<leader>as", ":'<,'>ChatSend<cr>",    { desc = "chatforge s
 
 ```
 lua/chatforge/
-  init.lua              entry point — setup(), all command registrations
+  init.lua              entry point, setup(), all command registrations
   config.lua            defaults + M.setup()
 
   ui/
-    chat.lua            chat buffer, floating input, send flow
-    render.lua          markdown rendering, green code highlights, action hints
-    model_picker.lua    native floating model picker, fetches from Ollama
-    floating.lua        syntax-highlighted code preview popup + action bar
+    chat.lua            chat display, right-side input pane, send flow
+    render.lua          text-only chat rendering and command hints
 
   core/
     state.lua           per-buffer { model, history } + pending_blocks
     dispatcher.lua      @file/@dir injection, intent classification, context enrichment
     parser.lua          splits AI response into text / code / action segments
-    actions.lua         apply / diff / yank / reject_all
+    actions.lua         apply / diff / reject_all
 
   api/
-    client.lua          unified send — picks backend, prepends system prompt
+    client.lua          unified send, picks backend, prepends system prompt
     backends.lua        Ollama HTTP via curl
+    backend_control.lua start, stop, and inspect plugin-managed Ollama jobs
     prompts.lua         optional prompt templates
 
   utils/
     buffer.lua          get_content, get_visual_selection, get_name, get_filetype
-    window.lua          open_float / close_float helpers
-    logger.lua          log / warn / err — gated by config.debug
+    logger.lua          log / warn / err, gated by config.debug
 ```
 
 ---
@@ -361,7 +365,7 @@ local openai = {}
 function openai.ask(base_url, model, messages, on_done)
   -- on_done(text, nil) on success
   -- on_done(nil, err_string) on failure
-  -- must be async — use vim.system
+  -- must be async, use vim.system
 end
 
 local registry = {
@@ -377,19 +381,19 @@ Then in `api/client.lua` change `backends.get("ollama")` to read from `config.va
 ## Troubleshooting
 
 **`Ollama unreachable`**
-Make sure `ollama serve` is running. Check `ollama_url` in your config matches where it's listening.
+chatforge will ask whether to start `ollama serve`, show the command, or ignore it. You can also run `:ChatBackend start` yourself. Stop plugin-managed Ollama with `:ChatBackend stop`.
 
 **Model not found**
-Run `ollama pull <model>` first. The picker only shows models Ollama already has downloaded.
+chatforge will ask whether to run `ollama pull <model>`, show the command, or ignore it. Stop a plugin-managed pull with `:ChatBackend stop`.
 
 **`No pending blocks`**
-The last response had no fenced code blocks — model responded with plain text. Nothing to apply or preview.
+The last response had no fenced code blocks. The model responded with plain text. Nothing to apply or preview.
 
-**`Switch to your source buffer first`**
-You ran `:ChatSend` or `:ChatApply` while focused on the chat buffer itself. Switch to your actual file first.
+**`Open or focus a source buffer first`**
+chatforge could not find the file buffer that should receive an apply or diff. Open the target file, then run `:Chat`.
 
 **`@file path could not be read`**
-Path doesn't exist or can't be opened. Paths are relative to Neovim's cwd — `:pwd` shows you where that is.
+Path doesn't exist or can't be opened. Paths are relative to Neovim's cwd. `:pwd` shows you where that is.
 
 **Debug mode**
 `debug = true` in `setup()`. Every step emits a `[chatforge]` notification.
@@ -398,9 +402,9 @@ Path doesn't exist or can't be opened. Paths are relative to Neovim's cwd — `:
 
 ## Known Limitations
 
-- No streaming — response appears all at once when the request finishes
-- Only Ollama right now — adding another backend is a couple dozen lines in `backends.lua`
-- Pending blocks are replaced on each new response — act on them before sending another message
+- Ollama response text is non-streaming right now; proposed code is staged live once the response returns
+- Only Ollama right now. Adding another backend is a couple dozen lines in `backends.lua`
+- Pending blocks are replaced on each new response. Act on them before sending another message
 - `@dir` is one level deep, no recursive tree
 - No multi-buffer edits from a single response
 

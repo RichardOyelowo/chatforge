@@ -5,9 +5,9 @@ local NL    = "\n"
 local CHAT_WIDTH = 58
 local INPUT_HEIGHT = 4
 
-vim.api.nvim_set_hl(0, "ChatforgeUserBubble", { link = "Identifier", default = true })
-vim.api.nvim_set_hl(0, "ChatforgeAssistantBubble", { link = "Normal", default = true })
-vim.api.nvim_set_hl(0, "ChatforgeInputBox", { link = "FloatBorder", default = true })
+vim.api.nvim_set_hl(0, "ChatforgeUserBubble", { fg = "#d7f7ff", bg = "#17343a", default = true })
+vim.api.nvim_set_hl(0, "ChatforgeAssistantBubble", { fg = "#d8dee9", bg = "#171a22", default = true })
+vim.api.nvim_set_hl(0, "ChatforgeInputBox", { fg = "#89b4fa", bg = "#090d18", default = true })
 vim.api.nvim_set_hl(0, "ChatforgeMuted", { link = "Comment", default = true })
 vim.api.nvim_set_hl(0, "ChatforgeStatus", { link = "DiagnosticInfo", default = true })
 
@@ -93,14 +93,16 @@ end
 
 local function input_box_lines(input_lines)
   local width = visible_width()
-  local top = "+" .. string.rep("-", width - 2) .. "+"
+  local label = " message "
+  local top = "╭" .. label .. string.rep("─", math.max(width - #label - 2, 0)) .. "╮"
+  local bottom = "╰" .. string.rep("─", width - 2) .. "╯"
   local lines = { "", top }
   for i = 1, INPUT_HEIGHT do
     local content = input_lines[i] or ""
     content = content:sub(1, width - 4)
-    table.insert(lines, "> " .. content)
+    table.insert(lines, "│ " .. content .. string.rep(" ", math.max(width - #content - 4, 0)) .. " │")
   end
-  table.insert(lines, top)
+  table.insert(lines, bottom)
   return lines
 end
 
@@ -166,7 +168,9 @@ end
 
 local function message_lines(content, opts)
   opts = opts or {}
-  local width = math.min(visible_width() - 10, opts.width or 44)
+  local full_width = visible_width()
+  local max_width = math.max(math.floor(full_width * 0.78), 28)
+  local width = math.min(max_width, opts.width or max_width)
   local body = {}
   for _, line in ipairs(split_lines(chat_safe_text(content))) do
     for _, wrapped in ipairs(wrap_line(line, width)) do
@@ -178,21 +182,21 @@ local function message_lines(content, opts)
     body = { "" }
   end
 
-  local full_width = visible_width()
   local label = opts.label or ""
   local lines = { "" }
 
   if opts.align == "right" then
-    local label_pad = math.max(full_width - #label, 0)
+    local label_pad = math.max(full_width - #label - 2, 0)
     table.insert(lines, string.rep(" ", label_pad) .. label)
     for _, line in ipairs(body) do
-      local pad = math.max(full_width - #line, 0)
-      table.insert(lines, string.rep(" ", pad) .. line)
+      local padded = " " .. line .. " "
+      local pad = math.max(full_width - #padded - 2, 0)
+      table.insert(lines, string.rep(" ", pad) .. padded)
     end
   else
     table.insert(lines, label)
     for _, line in ipairs(body) do
-      table.insert(lines, line)
+      table.insert(lines, " " .. line .. " ")
     end
   end
   return lines
@@ -200,12 +204,18 @@ end
 
 function M.write_header()
   state.chat_lines = {
-    "chatforge",
-    "Ask, attach @file or @dir context, then review staged edits in the source buffer.",
+    "# chatforge",
+    "",
+    "Ask in the message box below. Generated code is kept out of this pane.",
+    "Apply writes into the source file; Reject discards the pending implementation.",
+    "",
+    "---",
   }
   state.chat_spans = {
     { line = 1, kind = "muted" },
-    { line = 2, kind = "muted" },
+    { line = 3, kind = "muted" },
+    { line = 4, kind = "muted" },
+    { line = 6, kind = "muted" },
   }
   state.input_lines = { "" }
   redraw({ "" })
@@ -218,7 +228,7 @@ end
 
 function M.append_user(content, model)
   local label = string.format("You [%s]", model or "?")
-  append_transcript(message_lines(content, { label = label, align = "right", width = 38 }), "user")
+  append_transcript(message_lines(content, { label = label, align = "right" }), "user")
 end
 
 function M.append_segments(segments)
@@ -258,16 +268,16 @@ function M.append_segments(segments)
     table.insert(text_parts, "Generated code is staged in the source buffer and highlighted until Apply or Reject.")
   end
 
-  append_transcript(message_lines(table.concat(text_parts, "\n\n"), { label = "Assistant", align = "left", width = 44 }), "assistant")
+  append_transcript(message_lines(table.concat(text_parts, "\n\n"), { label = "Assistant", align = "left" }), "assistant")
 end
 
 function M.append_assistant_text(content)
-  append_transcript(message_lines(content, { label = "Assistant", align = "left", width = 44 }), "assistant")
+  append_transcript(message_lines(content, { label = "Assistant", align = "left" }), "assistant")
 end
 
 function M.append_status(msg, kind)
   local label = kind == "error" and "Error" or "Status"
-  local lines = message_lines(msg, { label = label, align = "left", width = 42 })
+  local lines = message_lines(msg, { label = label, align = "left" })
   local start_idx = #(state.chat_lines or {}) + 1
   append_transcript(lines, "status")
   state.last_status_span = { start = start_idx, finish = start_idx + #lines - 1 }
