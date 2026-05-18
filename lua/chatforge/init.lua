@@ -4,6 +4,7 @@
 --   :ChatModel [model]      set model for current buffer, or open picker
 --   :ChatReset              clear history and reopen
 --   :ChatApply [N]          accept staged implementation N
+--   :ChatAccept             accept the first staged implementation
 --   :ChatDiff  [N]          diff block N against current buffer
 --   :ChatReject             discard all pending blocks
 --   :ChatBackend <cmd>      manage local backend helpers
@@ -126,12 +127,28 @@ function M.setup(opts)
     actions.apply_to_current(n)
   end
   vim.api.nvim_create_user_command("ChatApply", do_apply, { desc = "Accept staged implementation N", nargs = "?" })
+
+  vim.api.nvim_create_user_command("ChatAccept", function()
+    actions.accept_current()
+  end, { desc = "Accept the first staged implementation" })
  
   -- ── :ChatDiff [N] ─────────────────────────────────────────────────────
   vim.api.nvim_create_user_command("ChatDiff", function(cmd)
     local n = tonumber(cmd.args) or 1
     actions.diff_with_current(n)
   end, { desc = "Diff pending code block N against current buffer", nargs = "?" })
+
+  vim.api.nvim_create_user_command("ChatReviewDiff", function()
+    actions.diff_current()
+  end, { desc = "Diff the first staged implementation" })
+
+  vim.api.nvim_create_user_command("ChatNextChange", function()
+    actions.jump_next()
+  end, { desc = "Jump to the next staged implementation line" })
+
+  vim.api.nvim_create_user_command("ChatPrevChange", function()
+    actions.jump_prev()
+  end, { desc = "Jump to the previous staged implementation line" })
  
   -- ── :ChatReject ───────────────────────────────────────────────────────
   vim.api.nvim_create_user_command("ChatReject", function()

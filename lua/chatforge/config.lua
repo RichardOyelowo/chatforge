@@ -19,15 +19,6 @@ M.defaults = {
       incoming = "ChatforgeProposedChange",
     },
   },
-  mappings = {
-    diff = {
-      accept = "ca",
-      reject = "co",
-      diff = "cd",
-      next = "]x",
-      prev = "[x",
-    },
-  },
   debug         = false,
   system_prompt = "You are a helpful coding assistant embedded in Neovim. "
                .. "Be concise. Use fenced code blocks with language tags for all code. "

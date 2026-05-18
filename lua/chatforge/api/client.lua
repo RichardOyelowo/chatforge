@@ -36,6 +36,12 @@ function M.complete(src_bufnr, messages, on_done, request_id, opts)
   state.loading = true
   log.log("client.complete: model=%s msgs=%d", model, #full)
 
+  opts = vim.tbl_deep_extend("force", {
+    temperature = cfg.temperature,
+    max_output_tokens = cfg.max_output_tokens or cfg.max_tokens,
+    context_tokens = cfg.context_tokens,
+  }, opts or {})
+
   be.ask(cfg.ollama_url, model, full, function(text, err)
     if request_id and request_id ~= state.request_id then
       return

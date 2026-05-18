@@ -73,8 +73,14 @@ Everything optional. Defaults shown:
 require("chatforge").setup({
   default_model = "llama3",
   ollama_url    = "http://localhost:11434",
-  max_tokens    = 4096,
+  max_output_tokens = 2048,
+  context_tokens = 64000,
   temperature   = 0.2,
+  highlights = {
+    diff = {
+      incoming = "ChatforgeProposedChange",
+    },
+  },
   debug         = false,
   system_prompt = "You are a helpful coding assistant embedded in Neovim. "
                .. "Be concise. Use fenced code blocks with language tags for all code. "
@@ -270,19 +276,23 @@ This automatic injection happens for:
 
 ## Code Blocks and Actions
 
-When a response is an implementation request, chatforge stages the generated code directly into the source buffer with a proposed-change highlight before you accept it. The chat pane stays text-only and shows command hints.
+When a response is an implementation request, chatforge streams the generated code directly into the source buffer with a proposed-change underline before you accept it. The chat pane stays text-only and shows command hints.
 
 See the [staged apply, diff, and reject demo](images/demo-staged-apply-diff-reject.webm).
 
 ```
-  :ChatApply 1    :ChatReject    :ChatDiff 1
+  :ChatAccept    :ChatReject    :ChatDiff
 ```
 
-**`:ChatApply N`** accepts the staged implementation, clears the proposed-change highlight, and leaves the code in the source buffer. If the prompt came from a visual selection, only that selected range is staged and accepted.
+**`:ChatAccept`** accepts the first staged implementation and writes the source buffer.
+
+**`:ChatApply N`** accepts staged implementation N, clears the proposed-change underline, and leaves the code in the source buffer. If the prompt came from a visual selection, only that selected range is staged and accepted.
 
 **`:ChatDiff N`** opens a tab with a side-by-side comparison. For a staged change, it compares the original lines against the proposed implementation. `:tabclose` when done.
 
 **`:ChatReject`** restores the original source lines and removes the staged implementation.
+
+**`:ChatNextChange`** and **`:ChatPrevChange`** jump around the staged change.
 
 Block numbers are just the order they appeared in the response. First code block is 1, second is 2. Apply only accepts a block that has been staged into the source buffer.
 
@@ -313,15 +323,25 @@ See the [backend and model recovery demo](images/demo-backend-model-recovery.web
 | `:ChatModel [name]` | No args = prompt for a model. With name = set directly |
 | `:ChatReset` | Clear history, reopen chat |
 | `:ChatApply [N]` | Accept staged implementation N. Default 1 |
+| `:ChatAccept` | Accept the first staged implementation |
 | `:ChatDiff [N]` | Diff block N against current buffer |
+| `:ChatReviewDiff` | Diff the first staged implementation |
 | `:ChatReject` | Restore original lines and discard staged changes |
+| `:ChatNextChange` | Jump to the end of the staged change |
+| `:ChatPrevChange` | Jump to the start of the staged change |
 | `:ChatBackend [status/start/stop]` | Inspect, start, or stop plugin-managed backend helpers |
 
 ---
 
 ## Keymaps
 
-chatforge does not set global user keymaps. The scratch message box has buffer-local input behavior: `<Enter>` sends and `<C-j>` inserts a newline. Add your own mappings in your Neovim config if you want shortcuts outside that input box.
+chatforge does not set global review keymaps. The message box has buffer-local input behavior: `<Enter>` sends and `<C-j>` inserts a newline. Add your own mappings in your Neovim config if you want shortcuts.
+
+```lua
+vim.keymap.set("n", "<leader>aa", "<cmd>ChatAccept<cr>", { desc = "chatforge accept" })
+vim.keymap.set("n", "<leader>ar", "<cmd>ChatReject<cr>", { desc = "chatforge reject" })
+vim.keymap.set("n", "<leader>ad", "<cmd>ChatReviewDiff<cr>", { desc = "chatforge diff" })
+```
 
 ---
 

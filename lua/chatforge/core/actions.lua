@@ -158,6 +158,11 @@ local function add_proposed_highlight(bufnr, start_idx, line_count, marks)
   for offset = 0, line_count - 1 do
     if not marks or marks[offset + 1] then
       vim.api.nvim_buf_add_highlight(bufnr, NS, proposed_hl(), start_idx + offset, 0, -1)
+      vim.api.nvim_buf_set_extmark(bufnr, NS, start_idx + offset, 0, {
+        virt_text = { { " AI", "DiagnosticHint" } },
+        virt_text_pos = "eol",
+        hl_mode = "combine",
+      })
     end
   end
 end
@@ -189,41 +194,6 @@ local function jump_staged(direction)
   local line = direction == "prev" and change.start_idx + 1
     or change.start_idx + math.max(change.new_line_count, 1)
   vim.api.nvim_win_set_cursor(state.source_winnr, { math.max(line, 1), 0 })
-end
-
-local function setup_review_keymaps(bufnr)
-  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
-    return
-  end
-  local cfg = config.values or {}
-  local mappings = cfg.mappings and cfg.mappings.diff or {}
-  local opts = { noremap = true, silent = true, buffer = bufnr }
-
-  if mappings.accept then
-    vim.keymap.set("n", mappings.accept, function()
-      M.apply_to_current(first_staged_idx() or 1)
-    end, vim.tbl_extend("force", opts, { desc = "chatforge accept AI change" }))
-  end
-  if mappings.reject then
-    vim.keymap.set("n", mappings.reject, function()
-      M.reject_all()
-    end, vim.tbl_extend("force", opts, { desc = "chatforge reject AI change" }))
-  end
-  if mappings.diff then
-    vim.keymap.set("n", mappings.diff, function()
-      M.diff_with_current(first_staged_idx() or 1)
-    end, vim.tbl_extend("force", opts, { desc = "chatforge diff AI change" }))
-  end
-  if mappings.next then
-    vim.keymap.set("n", mappings.next, function()
-      jump_staged("next")
-    end, vim.tbl_extend("force", opts, { desc = "chatforge next AI change" }))
-  end
-  if mappings.prev then
-    vim.keymap.set("n", mappings.prev, function()
-      jump_staged("prev")
-    end, vim.tbl_extend("force", opts, { desc = "chatforge previous AI change" }))
-  end
 end
 
 local function write_lines_live(bufnr, lines, target, opts, on_done)
@@ -354,7 +324,6 @@ function M.start_stream_preview(idx, block)
     lines = {},
   }
   state.applying = true
-  setup_review_keymaps(bufnr)
   return true
 end
 
@@ -447,6 +416,22 @@ function M.apply_to_current(idx)
   end
 end
 
+function M.accept_current()
+  M.apply_to_current(first_staged_idx() or 1)
+end
+
+function M.diff_current()
+  M.diff_with_current(first_staged_idx() or 1)
+end
+
+function M.jump_next()
+  jump_staged("next")
+end
+
+function M.jump_prev()
+  jump_staged("prev")
+end
+
 function M.stage_preview(idx)
   if block_while_applying("staging another change") then
     return
@@ -485,8 +470,7 @@ function M.stage_preview(idx)
   local target = block_target(idx, bufnr)
   write_lines_live(bufnr, lines, target, { highlight = true }, function(change)
     state.staged_changes[idx] = change
-    setup_review_keymaps(bufnr)
-    render.append_status("Implementation #" .. idx .. " staged. Press ca to accept, co to reject, cd to diff.")
+    render.append_status("Implementation #" .. idx .. " staged. Use :ChatAccept, :ChatReject, or :ChatDiff.")
     log.log("stage_preview: block=%d bufnr=%d", idx, bufnr)
   end)
 end

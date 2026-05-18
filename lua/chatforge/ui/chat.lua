@@ -6,7 +6,6 @@ local dispatcher = require("chatforge.core.dispatcher")
 local parser     = require("chatforge.core.parser")
 local actions    = require("chatforge.core.actions")
 local log        = require("chatforge.utils.logger")
-local config     = require("chatforge.config")
  
 -- ── buffer / window ────────────────────────────────────────────────────────
  
@@ -212,23 +211,6 @@ local function setup_chat_keymaps(bufnr)
   end
   vim.keymap.set("n", "<CR>", redirect, opts)
   vim.keymap.set("n", "gi", redirect, opts)
-
-  local mappings = config.values.mappings and config.values.mappings.diff or {}
-  if mappings.accept then
-    vim.keymap.set("n", mappings.accept, function()
-      actions.apply_to_current(1)
-    end, vim.tbl_extend("force", opts, { desc = "chatforge accept AI change" }))
-  end
-  if mappings.reject then
-    vim.keymap.set("n", mappings.reject, function()
-      actions.reject_all()
-    end, vim.tbl_extend("force", opts, { desc = "chatforge reject AI change" }))
-  end
-  if mappings.diff then
-    vim.keymap.set("n", mappings.diff, function()
-      actions.diff_with_current(1)
-    end, vim.tbl_extend("force", opts, { desc = "chatforge diff AI change" }))
-  end
 end
 
 local function has_staged_changes()
@@ -460,7 +442,7 @@ local function do_send(src_bufnr, input)
     log.log("pending_blocks=%d", #state.pending_blocks)
     render.append_segments(segments)
     if stream and stream.finished and state.staged_changes[1] then
-      render.append_status("Implementation #1 staged. Press ca to accept, co to reject, cd to diff.")
+      render.append_status("Implementation #1 staged. Use :ChatAccept, :ChatReject, or :ChatDiff.")
     end
     for i, block in ipairs(state.pending_blocks) do
       if block.stageable and not state.staged_changes[i] then
@@ -532,23 +514,6 @@ local function setup_input_keymaps(bufnr)
     end
     vim.api.nvim_put({ "" }, "l", true, true)
   end, opts)
-
-  local mappings = config.values.mappings and config.values.mappings.diff or {}
-  if mappings.accept then
-    vim.keymap.set("n", mappings.accept, function()
-      actions.apply_to_current(1)
-    end, vim.tbl_extend("force", opts, { desc = "chatforge accept AI change" }))
-  end
-  if mappings.reject then
-    vim.keymap.set("n", mappings.reject, function()
-      actions.reject_all()
-    end, vim.tbl_extend("force", opts, { desc = "chatforge reject AI change" }))
-  end
-  if mappings.diff then
-    vim.keymap.set("n", mappings.diff, function()
-      actions.diff_with_current(1)
-    end, vim.tbl_extend("force", opts, { desc = "chatforge diff AI change" }))
-  end
 end
 
 -- input == nil: focus the right-side input area

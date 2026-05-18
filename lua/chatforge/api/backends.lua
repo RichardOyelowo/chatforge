@@ -11,6 +11,11 @@ function ollama.ask(base_url, model, messages, on_done, opts)
     model    = model,
     messages = messages,
     stream   = opts.stream == true,
+    options  = {
+      temperature = opts.temperature,
+      num_predict = opts.max_output_tokens,
+      num_ctx = opts.context_tokens,
+    },
   })
 
   local url = base_url .. "/api/chat"
