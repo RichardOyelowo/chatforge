@@ -326,6 +326,10 @@ local function do_send(src_bufnr, input)
   local should_stage = edit_target ~= nil
     or dispatched.action == "edit_file"
     or dispatched.action == "create_file"
+  local explicit_target_file = dispatched.target
+    and (dispatched.action == "edit_file" or dispatched.action == "create_file")
+    and dispatched.target
+    or nil
 
   local stream = nil
   if should_stage then
@@ -341,7 +345,7 @@ local function do_send(src_bufnr, input)
         stageable = true,
         target = edit_target,
         target_bufnr = src_bufnr,
-        target_file = dispatched.target,
+        target_file = explicit_target_file,
         action = dispatched.action,
       },
     }
@@ -417,7 +421,7 @@ local function do_send(src_bufnr, input)
       if seg.type == "code" then
         local parsed_action = actions_by_block[seg.index] or {}
         local stageable = should_stage
-        if should_stage and not edit_target and not parsed_action.target and not dispatched.target then
+        if should_stage and not edit_target and not explicit_target_file then
           stageable = looks_like_full_file(seg.content, src_bufnr)
         end
         if not stream or not stream.finished then
@@ -428,13 +432,13 @@ local function do_send(src_bufnr, input)
             stageable = stageable,
             target = edit_target,
             target_bufnr = src_bufnr,
-            target_file = parsed_action.target or dispatched.target,
+            target_file = explicit_target_file,
             action = parsed_action.action,
           })
         else
           stream.block.lang = seg.lang
           stream.block.content = seg.content
-          stream.block.target_file = parsed_action.target or dispatched.target
+          stream.block.target_file = explicit_target_file
           stream.block.action = parsed_action.action
         end
       end
